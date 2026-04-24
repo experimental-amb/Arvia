@@ -9,6 +9,7 @@ import { DashboardTable } from "@/components/DashboardTable";
 import { useAuth } from "@/lib/auth-context";
 import { getDashboardProperties } from "@/services/api";
 import type { Property } from "@/types/property";
+import { BulkImportModal } from "@/components/BulkImportModal";
 
 const METRICS = [
   { icon: Building2, label: "Propiedades activas", value: "5", delta: "+2 este mes" },
@@ -22,17 +23,19 @@ export default function DashboardPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchProperties = async () => {
+    setLoading(true);
+    try {
+      const items = await getDashboardProperties(user?.uid);
+      setProperties(items);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (authLoading) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const items = await getDashboardProperties(user?.uid);
-        setProperties(items);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    fetchProperties();
   }, [authLoading, user?.uid]);
 
   return (
@@ -53,12 +56,15 @@ export default function DashboardPage() {
             Tus propiedades, conversaciones del bot y métricas en un solo lugar.
           </p>
         </div>
-        <Link href="/publish">
-          <Button className="gap-2">
-            <PlusCircle className="h-4 w-4" />
-            Nueva propiedad
-          </Button>
-        </Link>
+        <div className="flex items-center gap-3">
+          <BulkImportModal onSuccess={fetchProperties} />
+          <Link href="/publish">
+            <Button className="gap-2">
+              <PlusCircle className="h-4 w-4" />
+              Nueva propiedad
+            </Button>
+          </Link>
+        </div>
       </motion.div>
 
       {!user && !authLoading && (
