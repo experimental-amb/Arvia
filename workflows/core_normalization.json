@@ -1,0 +1,177 @@
+{
+  "name": "00 - Core Normalization",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-exec-wf",
+      "name": "Ejecutado por adapter",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [220, 320]
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// InitCore v1.0 — Normalización central\n// Recibe el payload parcial que envía un adapter y:\n//   1. Genera message_id (UUID v4)\n//   2. Genera user_id = sha256(channel + _user_identifier)\n//   3. Sanitiza HTML del texto (elimina tags, normaliza entidades)\n//   4. Trunca a 5000 chars (doble seguro, los adapters ya truncan)\n//   5. Detecta idioma si no viene (heurística simple)\n//   6. Calcula content_hash = sha256(channel + user_id + text) para dedupe\n// ============================================================\n\nconst crypto = require('crypto');\n\nconst input = $input.first().json;\n\nfunction sha256(s) {\n  return crypto.createHash('sha256').update(String(s), 'utf-8').digest('hex');\n}\n\nfunction uuidv4() {\n  return crypto.randomUUID();\n}\n\n// ---- Sanitizar HTML ----\nfunction stripHtml(html) {\n  if (!html) return '';\n  return String(html)\n    // Eliminar scripts y styles enteros\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    // Eliminar cualquier tag\n    .replace(/<\\/?[^>]+>/g, '')\n    // Decodificar entidades básicas\n    .replace(/&nbsp;/gi, ' ')\n    .replace(/&amp;/gi, '&')\n    .replace(/&lt;/gi, '<')\n    .replace(/&gt;/gi, '>')\n    .replace(/&quot;/gi, '\"')\n    .replace(/&#39;/gi, \"'\")\n    .replace(/&apos;/gi, \"'\")\n    // Colapsar espacios\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\n// ---- Heurística simple de idioma (suficiente para español/inglés) ----\nfunction detectLanguage(text) {\n  if (!text) return 'es';\n  const t = text.toLowerCase();\n  const esMarkers = /\\b(que|los|las|una|uno|por|para|con|sin|pero|cuando|donde|gracias|hola|buenos|buenas|necesito|quiero|puedes)\\b/;\n  const enMarkers = /\\b(the|and|you|are|with|from|what|when|where|thanks|hello|hi|need|want|can)\\b/;\n  const es = (t.match(esMarkers) || []).length;\n  const en = (t.match(enMarkers) || []).length;\n  if (en > es) return 'en';\n  return 'es';\n}\n\n// ---- Construir objeto normalizado ----\nconst channel = input.channel || 'unknown';\nconst userIdentifier = input._user_identifier || input.context?.email || input.context?.phone || 'anonymous';\nconst user_id = sha256(channel + ':' + userIdentifier);\nconst message_id = uuidv4();\n\nconst rawText = input.message?.text || '';\nconst cleanText = stripHtml(rawText).substring(0, 5000);\n\nconst language = (input.context?.language && input.context.language !== '')\n  ? input.context.language\n  : detectLanguage(cleanText);\n\nconst content_hash = sha256(channel + ':' + user_id + ':' + cleanText);\n\nconst payload = {\n  message_id,\n  user_id,\n  channel,\n  message: {\n    text: cleanText,\n    media: Array.isArray(input.message?.media) ? input.message.media : []\n  },\n  timestamp: input.timestamp || new Date().toISOString(),\n  context: {\n    name: input.context?.name || '',\n    email: input.context?.email || '',\n    phone: input.context?.phone || '',\n    language\n  },\n  metadata: {\n    ...(input.metadata || {}),\n    normalized_at: new Date().toISOString(),\n    core_version: '1.0.0'\n  },\n  status: input.status || 'pending',\n  content_hash\n};\n\nreturn [{ json: payload }];"
+      },
+      "id": "fn-normalize",
+      "name": "Normalizar payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 320]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT 1 AS exists FROM hashes WHERE content_hash = $1 AND created_at > NOW() - INTERVAL '24 hours' LIMIT 1;",
+        "additionalFields": {
+          "queryParams": "={{ $json.content_hash }}"
+        },
+        "options": {}
+      },
+      "id": "pg-check-duplicate",
+      "name": "Comprobar duplicado 24h",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [700, 320],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "functionCode": "// Combina el resultado del SELECT con el payload original\nconst payload = $('Normalizar payload').first().json;\nconst dupCheck = $input.first().json;\nconst isDuplicate = Boolean(dupCheck && (dupCheck.exists === 1 || dupCheck.exists === '1'));\nreturn [{ json: { ...payload, _is_duplicate: isDuplicate } }];"
+      },
+      "id": "fn-merge-dupcheck",
+      "name": "Unir resultado dedupe",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [940, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json._is_duplicate }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-duplicate",
+      "name": "¿Es duplicado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1180, 320]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Rama duplicado — no inserta, devuelve status skipped\nconst p = $input.first().json;\nreturn [{ json: { message_id: p.message_id, channel: p.channel, status: 'duplicate_24h_skipped', content_hash: p.content_hash } }];"
+      },
+      "id": "fn-duplicate-response",
+      "name": "Respuesta duplicado",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1420, 200]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "message_id, user_id, channel, text, media, ts, context, metadata, status, content_hash",
+        "additionalFields": {},
+        "returnFields": "message_id"
+      },
+      "id": "pg-insert-message",
+      "name": "Insertar en messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1420, 440],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "hashes",
+        "columns": "content_hash, message_id, channel",
+        "additionalFields": {}
+      },
+      "id": "pg-insert-hash",
+      "name": "Insertar en hashes",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1660, 440],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Devuelve OK al adapter\nconst payload = $('Unir resultado dedupe').first().json;\nreturn [{ json: { message_id: payload.message_id, user_id: payload.user_id, channel: payload.channel, status: 'persisted' } }];"
+      },
+      "id": "fn-ok-response",
+      "name": "Respuesta OK",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1900, 440]
+    }
+  ],
+  "connections": {
+    "Ejecutado por adapter": {
+      "main": [[{ "node": "Normalizar payload", "type": "main", "index": 0 }]]
+    },
+    "Normalizar payload": {
+      "main": [[{ "node": "Comprobar duplicado 24h", "type": "main", "index": 0 }]]
+    },
+    "Comprobar duplicado 24h": {
+      "main": [[{ "node": "Unir resultado dedupe", "type": "main", "index": 0 }]]
+    },
+    "Unir resultado dedupe": {
+      "main": [[{ "node": "¿Es duplicado?", "type": "main", "index": 0 }]]
+    },
+    "¿Es duplicado?": {
+      "main": [
+        [{ "node": "Respuesta duplicado", "type": "main", "index": 0 }],
+        [{ "node": "Insertar en messages", "type": "main", "index": 0 }]
+      ]
+    },
+    "Insertar en messages": {
+      "main": [[{ "node": "Insertar en hashes", "type": "main", "index": 0 }]]
+    },
+    "Insertar en hashes": {
+      "main": [[{ "node": "Respuesta OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "InitCore v1.0 — Core de normalización. Recibe el payload parcial de un adapter, genera message_id (UUID v4) y user_id (SHA-256), sanitiza HTML, trunca a 5000 chars, detecta idioma, calcula content_hash y evita duplicados en ventana de 24h antes de insertar en PostgreSQL."
+  },
+  "id": "initcore-00-core",
+  "tags": [
+    { "name": "initcore" },
+    { "name": "core" }
+  ]
+}

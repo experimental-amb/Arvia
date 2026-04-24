@@ -1,0 +1,345 @@
+{
+  "name": "01 - WhatsApp Adapter (Twilio)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "initcore/whatsapp",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true,
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "wh-whatsapp-entry",
+      "name": "Webhook Twilio (WhatsApp)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        320
+      ],
+      "webhookId": "initcore-whatsapp-v1"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// InitCore v1.0 — Validación de firma X-Twilio-Signature\n// Algoritmo oficial de Twilio:\n//   1. Concatenar URL completa del webhook\n//   2. Ordenar alfabéticamente los parámetros POST\n//   3. Concatenar clave+valor (sin separador) en orden\n//   4. HMAC-SHA1 con el Auth Token de Twilio\n//   5. Base64 del resultado → comparar con header X-Twilio-Signature\n// ============================================================\n\nconst crypto = require('crypto');\n\nconst authToken = $env.TWILIO_AUTH_TOKEN;\nif (!authToken) {\n  throw new Error('TWILIO_AUTH_TOKEN no está definido en variables de entorno');\n}\n\nconst signatureHeader = $input.first().json.headers['x-twilio-signature']\n  || $input.first().json.headers['X-Twilio-Signature'];\n\nif (!signatureHeader) {\n  return [{ json: { valid: false, reason: 'Header X-Twilio-Signature ausente', status: 'rejected' } }];\n}\n\n// URL pública donde Twilio envió el POST (debe coincidir EXACTAMENTE)\nconst webhookUrl = $env.TWILIO_WEBHOOK_URL || 'https://tu-dominio.com/webhook/initcore/whatsapp';\n\n// Twilio envía form-urlencoded; n8n lo parsea en body\nconst body = $input.first().json.body || {};\n\n// Ordenar claves alfabéticamente y concatenar key+value\nconst sortedKeys = Object.keys(body).sort();\nlet dataToSign = webhookUrl;\nfor (const key of sortedKeys) {\n  dataToSign += key + body[key];\n}\n\n// HMAC-SHA1 y base64\nconst computed = crypto\n  .createHmac('sha1', authToken)\n  .update(Buffer.from(dataToSign, 'utf-8'))\n  .digest('base64');\n\nconst valid = crypto.timingSafeEqual(\n  Buffer.from(computed),\n  Buffer.from(signatureHeader)\n);\n\nif (!valid) {\n  return [{\n    json: {\n      valid: false,\n      reason: 'Firma Twilio inválida',\n      status: 'rejected',\n      computed,\n      received: signatureHeader\n    }\n  }];\n}\n\nreturn [{ json: { ...body, valid: true, headers: $input.first().json.headers } }];"
+      },
+      "id": "fn-validate-signature",
+      "name": "Validar firma Twilio",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-signature-valid",
+      "name": "¿Firma válida?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(String(s),'utf-8').digest('hex');\nconst stripHtml = html => !html ? '' : String(html)\n  .replace(/<script[\\s\\S]*?<\\/script>/gi,'')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi,'')\n  .replace(/<\\/?[^>]+>/g,'')\n  .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<')\n  .replace(/&gt;/gi,'>').replace(/&quot;/gi,'\"').replace(/&#39;|&apos;/gi,\"'\")\n  .replace(/\\s+/g,' ').trim();\nconst normForHash = t => (t||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^\\p{L}\\p{N}]+/gu,' ').replace(/\\s+/g,' ').trim();\n\n// ============================================================\n// InitCore v1.0 — Extracción y normalización desde Twilio\n// Convierte payload Twilio → formato unificado InitCore\n// ============================================================\n\nconst data = $input.first().json;\n\n// Extraer número (From viene como 'whatsapp:+34666123456')\nconst fromRaw = data.From || '';\nconst phone = fromRaw.replace('whatsapp:', '').trim();\n\n// Construir array de media (Twilio numera MediaUrl0, MediaUrl1, ...)\nconst numMedia = parseInt(data.NumMedia || '0', 10);\nconst media = [];\nfor (let i = 0; i < numMedia; i++) {\n  const url = data[`MediaUrl${i}`];\n  const type = data[`MediaContentType${i}`] || 'application/octet-stream';\n  if (url) media.push({ url, type });\n}\n\n// Truncar texto a 5000 chars según spec InitCore\nconst text = (data.Body || '').toString().substring(0, 5000);\n\n// Payload parcial — el core se encarga de UUID, hash SHA-256 del user, dedupe, etc.\nconst payload = {\n  channel: 'whatsapp',\n  message: {\n    text,\n    media\n  },\n  timestamp: new Date().toISOString(),\n  context: {\n    name: data.ProfileName || '',\n    email: '',\n    phone,\n    language: 'es'\n  },\n  metadata: {\n    source: 'whatsapp_adapter',\n    adapter_version: '1.0.0',\n    twilio_message_sid: data.MessageSid || '',\n    twilio_account_sid: data.AccountSid || '',\n    raw_from: fromRaw\n  },\n  status: 'pending',\n  // El core usará este campo para generar user_id = sha256(channel + phone)\n  _user_identifier: phone\n};\n\n\nconst message_id = crypto.randomUUID();\nconst sender_id = sha256(payload.channel + ':' + payload._user_identifier);\nconst cleanText = stripHtml(payload.message?.text || '');\nconst mediaFingerprint = (payload.message?.media||[]).map(m => m.url || m.file_id || '').join('|');\nconst hashKey = normForHash(cleanText);\nconst hash = sha256(payload.channel + ':' + sender_id + ':' + (hashKey || mediaFingerprint || message_id));\n\n// Flatten out the response so it is easy to persist to messages table, AND hold the 5 fields\nconst newPayload = {\n  channel: payload.channel,\n  message_id: message_id,\n  sender_id: sender_id,\n  user_id: sender_id, // keep it around for the messages table insert\n  text: cleanText,\n  hash: hash,\n  media: payload.message?.media || [],\n  ts: payload.timestamp || new Date().toISOString(),\n  context: payload.context || {},\n  metadata: payload.metadata || {}\n};\n\nreturn [{ json: newPayload }];\n"
+      },
+      "id": "fn-extract-whatsapp",
+      "name": "Extraer datos WhatsApp",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        940,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $env.CORE_NORMALIZATION_WORKFLOW_ID }}",
+        "options": {
+          "waitForExecution": true
+        }
+      },
+      "id": "exec-core",
+      "name": "Ejecutar core_normalization",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": false
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"accepted\",\"message_id\":\"{{ $json.message_id || '' }}\",\"channel\":\"whatsapp\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Responder 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1820,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"rejected\",\"reason\":\"{{ $json.reason || 'unknown' }}\"}",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "respond-403",
+      "name": "Responder 403 Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        940,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// Handler de error — registra en tabla `errors` y responde 500\n// ============================================================\nconst err = $input.first().json;\nreturn [{\n  json: {\n    channel: 'whatsapp',\n    error_message: err.error?.message || 'Error desconocido en WhatsApp adapter',\n    error_stack: err.error?.stack || '',\n    payload: err,\n    timestamp: new Date().toISOString(),\n    retry_count: err.$execution?.retryCount || 0\n  }\n}];"
+      },
+      "id": "fn-error-handler",
+      "name": "Formatear error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "errors",
+        "columns": "channel, error_message, error_stack, payload, retry_count, created_at",
+        "additionalFields": {}
+      },
+      "id": "pg-log-error",
+      "name": "Log error → PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1420,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"error\",\"message\":\"internal_error\"}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-500",
+      "name": "Responder 500",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "message_id, user_id, channel, text, media, ts, context, metadata",
+        "additionalFields": {}
+      },
+      "id": "exec-core_pg_meta",
+      "name": "Guardar Metadata Adapter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1160,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const p = $input.first().json;\\nreturn [{ json: { channel: p.channel, message_id: p.message_id, sender_id: p.sender_id, text: p.text, hash: p.hash } }];"
+      },
+      "id": "exec-core_format_core",
+      "name": "Formatear payload Core",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1380,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Twilio (WhatsApp)": {
+      "main": [
+        [
+          {
+            "node": "Validar firma Twilio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar firma Twilio": {
+      "main": [
+        [
+          {
+            "node": "¿Firma válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Firma válida?": {
+      "main": [
+        [
+          {
+            "node": "Extraer datos WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder 403 Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer datos WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Guardar Metadata Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar core_normalization": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear error": {
+      "main": [
+        [
+          {
+            "node": "Log error → PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log error → PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "Responder 500",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Metadata Adapter": {
+      "main": [
+        [
+          {
+            "node": "Formatear payload Core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear payload Core": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar core_normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "InitCore v1.0 — Adapter WhatsApp vía Twilio. Valida X-Twilio-Signature (HMAC-SHA1), extrae From/Body/MediaUrl0..N y llama al workflow core_normalization mediante Execute Workflow con reintentos exponenciales (3 intentos)."
+  },
+  "id": "initcore-01-whatsapp",
+  "tags": [
+    {
+      "name": "initcore"
+    },
+    {
+      "name": "adapter"
+    },
+    {
+      "name": "whatsapp"
+    }
+  ]
+}

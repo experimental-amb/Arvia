@@ -1,0 +1,47 @@
+{
+  "name": "99 - Metrics v1.1 (health + unstick + DLQ)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
+      "id": "trigger", "name": "Cron 60s",
+      "type": "n8n-nodes-base.cron", "typeVersion": 1, "position": [200, 320]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Agregado 1 min + salud + mantenimiento en una sola tx\nSELECT fn_unstick_processing(5) AS unstuck;\nSELECT fn_move_to_dlq(5)        AS moved_dlq;\nSELECT fn_purge_old_hashes()    AS purged_hashes;\nSELECT channel,\n       COUNT(*)                                              AS total,\n       COUNT(*) FILTER (WHERE status='processed')            AS processed,\n       COUNT(*) FILTER (WHERE status='failed')               AS failed,\n       COUNT(*) FILTER (WHERE status='pending')              AS pending,\n       COUNT(*) FILTER (WHERE status='duplicate_24h_skipped') AS duplicates,\n       COUNT(*) FILTER (WHERE status='skipped_by_intent')    AS skipped,\n       COUNT(*) FILTER (WHERE status='dlq')                  AS dlq\n  FROM messages\n WHERE created_at > NOW() - INTERVAL '1 minute'\n GROUP BY channel;",
+        "options": {}
+      },
+      "id": "pg-maint", "name": "Mantenimiento + agregado",
+      "type": "n8n-nodes-base.postgres", "typeVersion": 2.4, "position": [420, 320],
+      "credentials": { "postgres": { "id": "initcore-postgres", "name": "InitCore PostgreSQL" } }
+    },
+    {
+      "parameters": {
+        "functionCode": "const rows = $input.all().map(i => i.json).filter(r => r.channel);\nconst out = [];\nfor (const row of rows) {\n  for (const m of ['total','processed','failed','pending','duplicates','skipped','dlq']) {\n    out.push({ json: {\n      channel: row.channel,\n      metric_name: `messages_per_minute.${m}`,\n      metric_value: Number(row[m] || 0),\n      dimensions: JSON.stringify({ channel: row.channel })\n    }});\n  }\n}\nreturn out;"
+      },
+      "id": "fn-explode", "name": "Explotar métricas",
+      "type": "n8n-nodes-base.function", "typeVersion": 1, "position": [640, 320]
+    },
+    {
+      "parameters": {
+        "operation": "insert", "table": "metrics",
+        "columns": "channel,metric_name,metric_value,dimensions", "additionalFields": {}
+      },
+      "id": "pg-insert", "name": "Insertar métricas",
+      "type": "n8n-nodes-base.postgres", "typeVersion": 2.4, "position": [860, 320],
+      "credentials": { "postgres": { "id": "initcore-postgres", "name": "InitCore PostgreSQL" } }
+    }
+  ],
+  "connections": {
+    "Cron 60s":                  { "main": [[{ "node": "Mantenimiento + agregado", "type": "main", "index": 0 }]] },
+    "Mantenimiento + agregado":  { "main": [[{ "node": "Explotar métricas", "type": "main", "index": 0 }]] },
+    "Explotar métricas":         { "main": [[{ "node": "Insertar métricas", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1.1.0",
+  "meta": { "description": "Metrics v1.1: fusiona unstick stuck processing + mover DLQ + purgar hashes + agregar 1 min en una sola tx. Añade métricas 'skipped' y 'dlq'." },
+  "id": "initcore-99-metrics-v11",
+  "tags": [{ "name": "initcore" }, { "name": "metrics" }, { "name": "v1.1" }]
+}

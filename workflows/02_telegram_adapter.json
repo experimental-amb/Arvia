@@ -1,0 +1,345 @@
+{
+  "name": "02 - Telegram Adapter (Bot API)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "initcore/telegram",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false,
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "wh-telegram-entry",
+      "name": "Webhook Telegram",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        320
+      ],
+      "webhookId": "initcore-telegram-v1"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// InitCore v1.0 — Validación de Telegram\n// Telegram Bot API permite definir un secret_token al registrar\n// el webhook (setWebhook). Ese token llega en el header:\n//   X-Telegram-Bot-Api-Secret-Token\n// Se compara con TELEGRAM_WEBHOOK_SECRET del entorno.\n// ============================================================\n\nconst headers = $input.first().json.headers || {};\nconst receivedSecret =\n  headers['x-telegram-bot-api-secret-token'] ||\n  headers['X-Telegram-Bot-Api-Secret-Token'];\n\nconst expectedSecret = $env.TELEGRAM_WEBHOOK_SECRET;\n\nif (!expectedSecret) {\n  throw new Error('TELEGRAM_WEBHOOK_SECRET no está definido en variables de entorno');\n}\n\nif (!receivedSecret || receivedSecret !== expectedSecret) {\n  return [{\n    json: {\n      valid: false,\n      reason: 'Secret token inválido o ausente',\n      status: 'rejected'\n    }\n  }];\n}\n\n// Validación adicional: el update debe contener message o edited_message\nconst body = $input.first().json.body || {};\nif (!body.message && !body.edited_message && !body.channel_post) {\n  return [{\n    json: {\n      valid: false,\n      reason: 'Update Telegram sin message/edited_message/channel_post',\n      status: 'rejected'\n    }\n  }];\n}\n\nreturn [{ json: { ...body, valid: true } }];"
+      },
+      "id": "fn-validate-telegram",
+      "name": "Validar secret token",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-telegram-valid",
+      "name": "¿Token válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(String(s),'utf-8').digest('hex');\nconst stripHtml = html => !html ? '' : String(html)\n  .replace(/<script[\\s\\S]*?<\\/script>/gi,'')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi,'')\n  .replace(/<\\/?[^>]+>/g,'')\n  .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<')\n  .replace(/&gt;/gi,'>').replace(/&quot;/gi,'\"').replace(/&#39;|&apos;/gi,\"'\")\n  .replace(/\\s+/g,' ').trim();\nconst normForHash = t => (t||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^\\p{L}\\p{N}]+/gu,' ').replace(/\\s+/g,' ').trim();\n\n// ============================================================\n// InitCore v1.0 — Extracción Telegram → formato unificado\n// Maneja: text, photo, document, voice, video, caption\n// ============================================================\n\nconst update = $input.first().json;\nconst msg = update.message || update.edited_message || update.channel_post || {};\nconst from = msg.from || {};\n\n// Texto o caption (para media con descripción)\nconst text = (msg.text || msg.caption || '').toString().substring(0, 5000);\n\n// Construcción del array de media\nconst media = [];\nconst botToken = $env.TELEGRAM_BOT_TOKEN;\nconst fileUrlBase = `https://api.telegram.org/file/bot${botToken}/`;\n\n// NOTA: Telegram devuelve file_id; el archivo real se obtiene con getFile.\n// Aquí guardamos el file_id y el tipo; el core (o un job posterior) descargará.\nif (Array.isArray(msg.photo) && msg.photo.length > 0) {\n  // La última entrada es la de mayor resolución\n  const largest = msg.photo[msg.photo.length - 1];\n  media.push({ file_id: largest.file_id, type: 'image/jpeg', width: largest.width, height: largest.height });\n}\nif (msg.document) {\n  media.push({ file_id: msg.document.file_id, type: msg.document.mime_type || 'application/octet-stream', file_name: msg.document.file_name });\n}\nif (msg.voice) {\n  media.push({ file_id: msg.voice.file_id, type: msg.voice.mime_type || 'audio/ogg', duration: msg.voice.duration });\n}\nif (msg.video) {\n  media.push({ file_id: msg.video.file_id, type: msg.video.mime_type || 'video/mp4', duration: msg.video.duration });\n}\nif (msg.audio) {\n  media.push({ file_id: msg.audio.file_id, type: msg.audio.mime_type || 'audio/mpeg', duration: msg.audio.duration });\n}\n\n// Detección de idioma a partir de language_code de Telegram\nconst language = (from.language_code || 'es').split('-')[0].toLowerCase();\n\n// Nombre completo del usuario\nconst name = [from.first_name, from.last_name].filter(Boolean).join(' ').trim();\n\nconst payload = {\n  channel: 'telegram',\n  message: {\n    text,\n    media\n  },\n  timestamp: new Date(((msg.date || Math.floor(Date.now() / 1000)) * 1000)).toISOString(),\n  context: {\n    name,\n    email: '',\n    phone: '',\n    language\n  },\n  metadata: {\n    source: 'telegram_adapter',\n    adapter_version: '1.0.0',\n    telegram_update_id: update.update_id,\n    telegram_message_id: msg.message_id,\n    telegram_chat_id: msg.chat?.id,\n    telegram_chat_type: msg.chat?.type,\n    telegram_username: from.username || '',\n    file_url_base: fileUrlBase\n  },\n  status: 'pending',\n  // El core generará user_id = sha256('telegram' + from.id)\n  _user_identifier: String(from.id || '')\n};\n\n\nconst message_id = crypto.randomUUID();\nconst sender_id = sha256(payload.channel + ':' + payload._user_identifier);\nconst cleanText = stripHtml(payload.message?.text || '');\nconst mediaFingerprint = (payload.message?.media||[]).map(m => m.url || m.file_id || '').join('|');\nconst hashKey = normForHash(cleanText);\nconst hash = sha256(payload.channel + ':' + sender_id + ':' + (hashKey || mediaFingerprint || message_id));\n\n// Flatten out the response so it is easy to persist to messages table, AND hold the 5 fields\nconst newPayload = {\n  channel: payload.channel,\n  message_id: message_id,\n  sender_id: sender_id,\n  user_id: sender_id, // keep it around for the messages table insert\n  text: cleanText,\n  hash: hash,\n  media: payload.message?.media || [],\n  ts: payload.timestamp || new Date().toISOString(),\n  context: payload.context || {},\n  metadata: payload.metadata || {}\n};\n\nreturn [{ json: newPayload }];\n"
+      },
+      "id": "fn-extract-telegram",
+      "name": "Extraer datos Telegram",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        940,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $env.CORE_NORMALIZATION_WORKFLOW_ID }}",
+        "options": {
+          "waitForExecution": true
+        }
+      },
+      "id": "exec-core",
+      "name": "Ejecutar core_normalization",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "continueOnFail": false
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"accepted\",\"message_id\":\"{{ $json.message_id || '' }}\",\"channel\":\"telegram\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Responder 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1820,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"rejected\",\"reason\":\"{{ $json.reason || 'unknown' }}\"}",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "respond-403",
+      "name": "Responder 403 Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        940,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Handler de error — formato idéntico al WhatsApp adapter\nconst err = $input.first().json;\nreturn [{\n  json: {\n    channel: 'telegram',\n    error_message: err.error?.message || 'Error desconocido en Telegram adapter',\n    error_stack: err.error?.stack || '',\n    payload: err,\n    timestamp: new Date().toISOString(),\n    retry_count: err.$execution?.retryCount || 0\n  }\n}];"
+      },
+      "id": "fn-error-handler",
+      "name": "Formatear error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "errors",
+        "columns": "channel, error_message, error_stack, payload, retry_count, created_at",
+        "additionalFields": {}
+      },
+      "id": "pg-log-error",
+      "name": "Log error → PostgreSQL",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1420,
+        480
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"error\",\"message\":\"internal_error\"}",
+        "options": {
+          "responseCode": 500
+        }
+      },
+      "id": "respond-500",
+      "name": "Responder 500",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "message_id, user_id, channel, text, media, ts, context, metadata",
+        "additionalFields": {}
+      },
+      "id": "exec-core_pg_meta",
+      "name": "Guardar Metadata Adapter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1160,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const p = $input.first().json;\\nreturn [{ json: { channel: p.channel, message_id: p.message_id, sender_id: p.sender_id, text: p.text, hash: p.hash } }];"
+      },
+      "id": "exec-core_format_core",
+      "name": "Formatear payload Core",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1380,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Telegram": {
+      "main": [
+        [
+          {
+            "node": "Validar secret token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar secret token": {
+      "main": [
+        [
+          {
+            "node": "¿Token válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Token válido?": {
+      "main": [
+        [
+          {
+            "node": "Extraer datos Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder 403 Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer datos Telegram": {
+      "main": [
+        [
+          {
+            "node": "Guardar Metadata Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar core_normalization": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear error": {
+      "main": [
+        [
+          {
+            "node": "Log error → PostgreSQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log error → PostgreSQL": {
+      "main": [
+        [
+          {
+            "node": "Responder 500",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Metadata Adapter": {
+      "main": [
+        [
+          {
+            "node": "Formatear payload Core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear payload Core": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar core_normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "errorWorkflow": ""
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "InitCore v1.0 — Adapter Telegram Bot API. Valida X-Telegram-Bot-Api-Secret-Token, extrae message.from/text/photo/document/voice/video y llama al workflow core_normalization con reintentos exponenciales (3 intentos)."
+  },
+  "id": "initcore-02-telegram",
+  "tags": [
+    {
+      "name": "initcore"
+    },
+    {
+      "name": "adapter"
+    },
+    {
+      "name": "telegram"
+    }
+  ]
+}

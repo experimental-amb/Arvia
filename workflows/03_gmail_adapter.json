@@ -1,0 +1,303 @@
+{
+  "name": "03 - Gmail Adapter (Pub/Sub Push)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "initcore/gmail",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "wh-gmail-entry",
+      "name": "Webhook Pub/Sub Gmail",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        320
+      ],
+      "webhookId": "initcore-gmail-v1"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// InitCore v1.0 — Gmail Adapter\n// Gmail envía notificaciones Pub/Sub con data base64 que contiene\n// { emailAddress, historyId }. Necesitamos:\n//   1. Decodificar data\n//   2. Validar token JWT del header Authorization (firmado por Google)\n//   3. Llamar a Gmail API messages.get con el historyId para\n//      obtener el mensaje real (se delega a otro nodo HTTP Request)\n// ============================================================\n\nconst body = $input.first().json.body || {};\nconst msg = body.message || {};\nif (!msg.data) {\n  return [{ json: { valid: false, reason: 'Pub/Sub sin data', status: 'rejected' } }];\n}\n\nconst decoded = Buffer.from(msg.data, 'base64').toString('utf-8');\nlet parsed;\ntry { parsed = JSON.parse(decoded); }\ncatch (e) { return [{ json: { valid: false, reason: 'data no es JSON', status: 'rejected' } }]; }\n\nif (!parsed.emailAddress || !parsed.historyId) {\n  return [{ json: { valid: false, reason: 'Falta emailAddress o historyId', status: 'rejected' } }];\n}\n\nreturn [{ json: { valid: true, email: parsed.emailAddress, history_id: parsed.historyId, pubsub_message_id: msg.messageId, publish_time: msg.publishTime } }];"
+      },
+      "id": "fn-decode-pubsub",
+      "name": "Decodificar Pub/Sub",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-pubsub-valid",
+      "name": "¿Válido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "filters": {
+          "receivedAfter": "={{ new Date(Date.now() - 5*60*1000).toISOString() }}"
+        },
+        "options": {
+          "format": "full"
+        }
+      },
+      "id": "gmail-get-messages",
+      "name": "Gmail API: mensajes recientes",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        940,
+        240
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "initcore-gmail-oauth",
+          "name": "InitCore Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(String(s),'utf-8').digest('hex');\nconst stripHtml = html => !html ? '' : String(html)\n  .replace(/<script[\\s\\S]*?<\\/script>/gi,'')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi,'')\n  .replace(/<\\/?[^>]+>/g,'')\n  .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<')\n  .replace(/&gt;/gi,'>').replace(/&quot;/gi,'\"').replace(/&#39;|&apos;/gi,\"'\")\n  .replace(/\\s+/g,' ').trim();\nconst normForHash = t => (t||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^\\p{L}\\p{N}]+/gu,' ').replace(/\\s+/g,' ').trim();\n\n// Extrae el último mensaje no leído y lo convierte a formato InitCore\nconst items = $input.all();\nif (items.length === 0) {\n  const payload = { _skip: true, reason: 'Sin mensajes nuevos' };\nconst message_id = crypto.randomUUID();\nconst sender_id = sha256(payload.channel + ':' + payload._user_identifier);\nconst cleanText = stripHtml(payload.message?.text || '');\nconst mediaFingerprint = (payload.message?.media||[]).map(m => m.url || m.file_id || '').join('|');\nconst hashKey = normForHash(cleanText);\nconst hash = sha256(payload.channel + ':' + sender_id + ':' + (hashKey || mediaFingerprint || message_id));\n\n// Flatten out the response so it is easy to persist to messages table, AND hold the 5 fields\nconst newPayload = {\n  channel: payload.channel,\n  message_id: message_id,\n  sender_id: sender_id,\n  user_id: sender_id, // keep it around for the messages table insert\n  text: cleanText,\n  hash: hash,\n  media: payload.message?.media || [],\n  ts: payload.timestamp || new Date().toISOString(),\n  context: payload.context || {},\n  metadata: payload.metadata || {}\n};\n\nreturn [{ json: newPayload }];\n"
+      },
+      "id": "fn-extract-gmail",
+      "name": "Extraer datos Gmail",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $env.CORE_NORMALIZATION_WORKFLOW_ID }}",
+        "options": {
+          "waitForExecution": true
+        }
+      },
+      "id": "exec-core",
+      "name": "Ejecutar core_normalization",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"accepted\",\"channel\":\"gmail\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Responder 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2060,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"rejected\",\"reason\":\"{{ $json.reason }}\"}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "respond-bad",
+      "name": "Responder 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        940,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "message_id, user_id, channel, text, media, ts, context, metadata",
+        "additionalFields": {}
+      },
+      "id": "exec-core_pg_meta",
+      "name": "Guardar Metadata Adapter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1400,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const p = $input.first().json;\\nreturn [{ json: { channel: p.channel, message_id: p.message_id, sender_id: p.sender_id, text: p.text, hash: p.hash } }];"
+      },
+      "id": "exec-core_format_core",
+      "name": "Formatear payload Core",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1620,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Pub/Sub Gmail": {
+      "main": [
+        [
+          {
+            "node": "Decodificar Pub/Sub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decodificar Pub/Sub": {
+      "main": [
+        [
+          {
+            "node": "¿Válido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Válido?": {
+      "main": [
+        [
+          {
+            "node": "Gmail API: mensajes recientes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail API: mensajes recientes": {
+      "main": [
+        [
+          {
+            "node": "Extraer datos Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer datos Gmail": {
+      "main": [
+        [
+          {
+            "node": "Guardar Metadata Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar core_normalization": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Metadata Adapter": {
+      "main": [
+        [
+          {
+            "node": "Formatear payload Core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear payload Core": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar core_normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "description": "InitCore v1.0 — Adapter Gmail. Recibe notificación Pub/Sub, decodifica base64, llama a Gmail API para recuperar el mensaje real y lo normaliza."
+  },
+  "id": "initcore-03-gmail",
+  "tags": [
+    {
+      "name": "initcore"
+    },
+    {
+      "name": "adapter"
+    },
+    {
+      "name": "gmail"
+    }
+  ]
+}

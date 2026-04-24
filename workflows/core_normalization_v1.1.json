@@ -1,0 +1,174 @@
+{
+  "name": "00 - Core Normalization v1.1 (prod)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-exec-wf",
+      "name": "Ejecutado por adapter",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const input = $input.first().json;\nreturn [{ json: { channel: input.channel, message_id: input.message_id, sender_id: input.sender_id, text: input.text, hash: input.hash } }];"
+      },
+      "id": "fn-normalize",
+      "name": "Normalizar payload",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        420,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO initcore_messages (channel, message_id, sender_id, text, hash, status, created_at)\nVALUES ($1, $2, $3, $4, $5, 'processing', NOW())\nON CONFLICT (hash) DO NOTHING\nRETURNING id;",
+        "additionalFields": {
+          "queryParams": "={{ $json.channel }},={{ $json.message_id }},={{ $json.sender_id }},={{ $json.text }},={{ $json.hash }}"
+        },
+        "options": {}
+      },
+      "id": "pg-insert-main",
+      "name": "Insertar Atómico (Idempotencia)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        640,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.id }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "if-inserted",
+      "name": "¿Insertado exitosamente?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        860,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { status: 'processing', hash: $('Normalizar payload').item.json.hash } }];"
+      },
+      "id": "fn-ok",
+      "name": "Respuesta OK",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { status: 'skipped', reason: 'duplicado', hash: $('Normalizar payload').item.json.hash } }];"
+      },
+      "id": "fn-dup",
+      "name": "Respuesta duplicado",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        440
+      ]
+    }
+  ],
+  "connections": {
+    "Ejecutado por adapter": {
+      "main": [
+        [
+          {
+            "node": "Normalizar payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar payload": {
+      "main": [
+        [
+          {
+            "node": "Insertar Atómico (Idempotencia)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insertar Atómico (Idempotencia)": {
+      "main": [
+        [
+          {
+            "node": "¿Insertado exitosamente?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Insertado exitosamente?": {
+      "main": [
+        [
+          {
+            "node": "Respuesta OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respuesta duplicado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "1.1.0",
+  "meta": {
+    "description": "InitCore v1.1 — Core con hash idempotente (normalización agresiva), lock atómico vía UNIQUE constraint (INSERT ON CONFLICT en hashes actúa como lock distribuido), clasificación de intent con gpt-4o-mini (skip tokens si spam/thanks), y persistencia con estado derivado. Degrada con gracia si OpenAI falla."
+  },
+  "id": "initcore-00-core-v11",
+  "tags": [
+    {
+      "name": "initcore"
+    },
+    {
+      "name": "core"
+    },
+    {
+      "name": "v1.1"
+    }
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "name": "90 - LLM Handler (Pending → Processed)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "seconds", "secondsInterval": 15 }] }
+      },
+      "id": "trigger-cron",
+      "name": "Cron 15s",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [220, 320]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT message_id, user_id, channel, text, context, metadata FROM messages WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10;",
+        "options": {}
+      },
+      "id": "pg-select-pending",
+      "name": "Seleccionar mensajes pending",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 320],
+      "credentials": {
+        "postgres": { "id": "initcore-postgres", "name": "InitCore PostgreSQL" }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-batches",
+      "name": "Procesar 1 a 1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [700, 320]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages SET status = 'processing' WHERE message_id = $1 RETURNING message_id;",
+        "additionalFields": { "queryParams": "={{ $json.message_id }}" },
+        "options": {}
+      },
+      "id": "pg-mark-processing",
+      "name": "Marcar processing",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [940, 320],
+      "credentials": {
+        "postgres": { "id": "initcore-postgres", "name": "InitCore PostgreSQL" }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyContentJson": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1024,\n  \"system\": \"Eres un asistente que recibe mensajes de clientes desde múltiples canales (whatsapp, telegram, email, web). Responde breve, profesional y en el idioma del usuario.\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ JSON.stringify($('Procesar 1 a 1').item.json.text) }} }]\n}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "http-llm",
+      "name": "Llamada a LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1180, 320],
+      "retryOnFail": true, "maxTries": 2, "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extrae la respuesta del LLM y la prepara para guardar\nconst res = $input.first().json;\nconst msg = $('Procesar 1 a 1').item.json;\nconst reply = (res.content && res.content[0] && res.content[0].text) || '';\nconst usage = res.usage || {};\nreturn [{ json: {\n  message_id: msg.message_id,\n  user_id: msg.user_id,\n  channel: msg.channel,\n  llm_response: reply,\n  input_tokens: usage.input_tokens || 0,\n  output_tokens: usage.output_tokens || 0,\n  stop_reason: res.stop_reason || null,\n  llm_model: res.model || 'claude-sonnet-4-6'\n}}];"
+      },
+      "id": "fn-format-response",
+      "name": "Formatear respuesta",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1420, 320]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "responses",
+        "columns": "message_id, llm_response, input_tokens, output_tokens, llm_model, stop_reason",
+        "additionalFields": {}
+      },
+      "id": "pg-insert-response",
+      "name": "Guardar respuesta",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1660, 320],
+      "credentials": {
+        "postgres": { "id": "initcore-postgres", "name": "InitCore PostgreSQL" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages SET status = 'processed' WHERE message_id = $1;",
+        "additionalFields": { "queryParams": "={{ $json.message_id }}" },
+        "options": {}
+      },
+      "id": "pg-mark-processed",
+      "name": "Marcar processed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1900, 320],
+      "credentials": {
+        "postgres": { "id": "initcore-postgres", "name": "InitCore PostgreSQL" }
+      }
+    }
+  ],
+  "connections": {
+    "Cron 15s": { "main": [[{ "node": "Seleccionar mensajes pending", "type": "main", "index": 0 }]] },
+    "Seleccionar mensajes pending": { "main": [[{ "node": "Procesar 1 a 1", "type": "main", "index": 0 }]] },
+    "Procesar 1 a 1": { "main": [[{ "node": "Marcar processing", "type": "main", "index": 0 }]] },
+    "Marcar processing": { "main": [[{ "node": "Llamada a LLM", "type": "main", "index": 0 }]] },
+    "Llamada a LLM": { "main": [[{ "node": "Formatear respuesta", "type": "main", "index": 0 }]] },
+    "Formatear respuesta": { "main": [[{ "node": "Guardar respuesta", "type": "main", "index": 0 }]] },
+    "Guardar respuesta": { "main": [[{ "node": "Marcar processed", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1", "saveDataErrorExecution": "all" },
+  "versionId": "1.0.0",
+  "meta": { "description": "InitCore v1.0 — Handler de salida al LLM. Cada 15s selecciona hasta 10 mensajes en status pending, llama a Claude Sonnet 4.6, guarda la respuesta en tabla responses y marca como processed." },
+  "id": "initcore-90-llm",
+  "tags": [{ "name": "initcore" }, { "name": "llm" }]
+}

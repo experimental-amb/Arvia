@@ -1,0 +1,294 @@
+{
+  "name": "InitCore Full Stack Agent (Telegram + Web API)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": ["message"]
+      },
+      "id": "telegram_trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "credentials": {
+        "telegramApi": { "id": "1", "name": "Telegram Bot" }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "web-api",
+        "options": {}
+      },
+      "id": "web_api_trigger",
+      "name": "Web API Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "const msg = $input.first().json;\nreturn [{ json: {\n  user_id: String(msg.message.from.id),\n  chat_id: String(msg.message.chat.id),\n  user_input: (msg.message.text || '').replace(/'/g, \"''\")\n} }];"
+      },
+      "id": "extract_data",
+      "name": "Extract Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const body = $input.first().json.body;\nreturn [{ json: {\n  operation: body.operation || 'search',\n  payload: body.payload || {},\n  source: 'web'\n} }];"
+      },
+      "id": "extract_web_data",
+      "name": "Extract Web Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [300, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO messages (user_id, text) VALUES ('{{ $json.user_id }}', '{{ $json.user_input }}');",
+        "additionalFields": {}
+      },
+      "id": "save_user_msg",
+      "name": "Save User Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [500, 300],
+      "credentials": {
+        "postgres": { "id": "1", "name": "Postgres InitCore" }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT text, response FROM messages WHERE user_id = '{{ $('Extract Data').item.json.user_id }}' ORDER BY created_at DESC LIMIT 5;",
+        "additionalFields": {}
+      },
+      "id": "get_memory",
+      "name": "Get Memory",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [700, 300],
+      "credentials": {
+        "postgres": { "id": "1", "name": "Postgres InitCore" }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "functionCode": "const rows = $input.all();\nconst history = rows.filter(r => r.json && r.json.text).map(r => `Usuario: ${r.json.text}${r.json.response ? '\\nAsistente: ' + r.json.response : ''}`).join('\\n');\nreturn [{ json: {\n  history: history || '(sin historial)',\n  user_id: $('Extract Data').item.json.user_id,\n  chat_id: $('Extract Data').item.json.chat_id,\n  user_input: $('Extract Data').item.json.user_input\n} }];"
+      },
+      "id": "prepare_context",
+      "name": "Prepare Context",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3', prompt: 'Clasifica la intención del siguiente mensaje en UNA sola palabra entre estas opciones: saludo, precio, soporte, consulta_propiedad, lead_propiedad, otro.\\n\\nUsa consulta_propiedad si menciona buscar casa, departamento, arriendo o comunas.\\nUsa lead_propiedad si dice: me interesa, quiero ver, mas info, visita, contacto, interesado.\\n\\nMensaje: ' + $json.user_input + '\\n\\nResponde solo con la palabra.', stream: false }) }}",
+        "options": {}
+      },
+      "id": "classify_intent",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1100, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const raw = ($input.first().json.response || '').toLowerCase().trim();\nconst ctx = $('Prepare Context').item.json;\nconst txt = ctx.user_input.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n\nlet intent = 'otro';\nif (raw.includes('lead_propiedad') || raw.includes('lead')) intent = 'lead_propiedad';\nelse if (raw.includes('consulta_propiedad') || raw.includes('propiedad')) intent = 'consulta_propiedad';\nelse if (raw.includes('saludo')) intent = 'saludo';\nelse if (raw.includes('precio')) intent = 'precio';\nelse if (raw.includes('soporte')) intent = 'soporte';\n\nif (intent === 'otro' && txt.match(/me interesa|quiero ver|mas info|visita|contacto|interesado/)) intent = 'lead_propiedad';\nif (intent === 'otro' && txt.match(/casa|departamento|depto|arriendo|propiedad|vina|serena|santiago|valparaiso|nunoa|providencia|maipu/)) intent = 'consulta_propiedad';\n\nreturn [{ json: { intent, user_id: ctx.user_id, chat_id: ctx.chat_id, user_input: ctx.user_input, history: ctx.history } }];"
+      },
+      "id": "parse_intent",
+      "name": "Parse Intent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "value1": "={{ $json.operation }}", "value2": "publish" },
+            { "value1": "={{ $json.operation }}", "value2": "ai_search" }
+          ]
+        }
+      },
+      "id": "switch_api_op",
+      "name": "Switch API Op",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [500, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO properties (title, description, price, region, comuna, address, bedrooms, bathrooms, sqm, images) VALUES ('{{ $json.payload.title }}', '{{ $json.payload.description }}', {{ $json.payload.price }}, '{{ $json.payload.region }}', '{{ $json.payload.comuna }}', '{{ $json.payload.address }}', {{ $json.payload.bedrooms }}, {{ $json.payload.bathrooms }}, {{ $json.payload.sqm }}, '{{ JSON.stringify($json.payload.images) }}') RETURNING id;",
+        "additionalFields": {}
+      },
+      "id": "api_publish_prop",
+      "name": "API Publish Prop",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [750, 500],
+      "credentials": { "postgres": { "id": "1", "name": "Postgres InitCore" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3', prompt: 'Extract filters from this real estate search as JSON: \"' + $json.payload.prompt + '\"\\n\\nFields: comuna, bedrooms, bathrooms, min_price, max_price.\\nExample: {\"comuna\": \"Las Condes\", \"bedrooms\": 2}\\n\\nRespond ONLY with JSON.', stream: false }) }}",
+        "options": {}
+      },
+      "id": "api_ai_extract",
+      "name": "API AI Extract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 700]
+    },
+    {
+      "parameters": {
+        "functionCode": "let raw = $input.first().json.response || '{}';\ntry {\n  const jsonMatch = raw.match(/\\{.*\\}/s);\n  const filters = JSON.parse(jsonMatch ? jsonMatch[0] : '{}');\n  return [{ json: { filters } }];\n} catch(e) { return [{ json: { filters: {} } }]; }"
+      },
+      "id": "parse_api_filters",
+      "name": "Parse API Filters",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [950, 700]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT * FROM properties WHERE (comuna ILIKE '%{{ $json.filters.comuna || '' }}%') AND (bedrooms >= {{ $json.filters.bedrooms || 0 }}) LIMIT 10;",
+        "additionalFields": {}
+      },
+      "id": "api_query_props",
+      "name": "API Query Props",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1150, 700],
+      "credentials": { "postgres": { "id": "1", "name": "Postgres InitCore" } }
+    },
+    {
+      "parameters": {
+        "options": { "responseBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}" }
+      },
+      "id": "web_api_response",
+      "name": "Web API Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1400, 600]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT * FROM user_state WHERE user_id = '{{ $json.user_id }}' LIMIT 1;",
+        "additionalFields": {}
+      },
+      "id": "get_user_state",
+      "name": "Get User State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [2300, 400],
+      "credentials": { "postgres": { "id": "1", "name": "Postgres InitCore" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "functionCode": "const ctx = $('Parse Intent').item.json;\nconst state = $input.first().json;\nconst msg = ctx.user_input;\nlet next_step, reply, sql, reply_markup = null;\n\nif (!state || !state.step) {\n  next_step = 'comuna';\n  reply = '¡Excelente! Iniciemos la búsqueda 🏡\\\\n\\\\n¿En qué *comuna* o sector buscas la propiedad?';\n  sql = `INSERT INTO user_state (user_id, step) VALUES ('${ctx.user_id}', 'comuna') ON CONFLICT (user_id) DO UPDATE SET step = 'comuna'`;\n} else if (state.step === 'comuna') {\n  next_step = 'dormitorios';\n  reply = `Perfecto, buscaremos en ${msg}. ¿Cuántos *dormitorios* necesitas?`;\n  reply_markup = { keyboard: [[{text: '1'}, {text: '2'}], [{text: '3'}, {text: '4+'}], [{text: 'Cualquiera'}]], one_time_keyboard: true, resize_keyboard: true };\n  sql = `UPDATE user_state SET step = 'dormitorios', comuna = '${msg}' WHERE user_id = '${ctx.user_id}'`;\n} else if (state.step === 'dormitorios') {\n  next_step = 'banos';\n  reply = 'Entendido. ¿Y cuántos *baños* buscas?';\n  reply_markup = { keyboard: [[{text: '1'}, {text: '2'}], [{text: '3+'}], [{text: 'Cualquiera'}]], one_time_keyboard: true, resize_keyboard: true };\n  sql = `UPDATE user_state SET step = 'banos', dormitorios = '${msg}' WHERE user_id = '${ctx.user_id}'`;\n} else if (state.step === 'banos') {\n  next_step = 'done';\n  reply = '¡Todo listo! Estoy buscando las mejores opciones para ti... ⏳';\n  sql = `UPDATE user_state SET step = 'done', banos = '${msg}' WHERE user_id = '${ctx.user_id}'`;\n}\n\nreturn [{ json: { next_step, reply, reply_markup, sql, user_id: ctx.user_id, chat_id: ctx.chat_id, state } }];"
+      },
+      "id": "wizard_logic",
+      "name": "Wizard Logic",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2500, 400]
+    },
+    {
+      "parameters": {
+        "conditions": { "string": [{ "value1": "={{ $json.next_step }}", "operation": "equal", "value2": "done" }] }
+      },
+      "id": "if_wizard_done",
+      "name": "IF Wizard Done",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2700, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT * FROM properties WHERE comuna ILIKE '%{{ $json.params.comuna }}%' AND (bedrooms >= {{ $json.params.dormitorios || 0 }}) LIMIT 3;",
+        "additionalFields": {}
+      },
+      "id": "query_properties",
+      "name": "Query Properties",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [3100, 250],
+      "credentials": { "postgres": { "id": "1", "name": "Postgres InitCore" } },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": { "reply_markup": "={{ JSON.stringify($json.reply_markup) }}" }
+      },
+      "id": "send_telegram",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [4200, 400],
+      "credentials": { "telegramApi": { "id": "1", "name": "Telegram Bot" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE messages SET response = '{{ $json.reply_db }}' WHERE id = (SELECT id FROM messages WHERE user_id = '{{ $json.user_id }}' AND response IS NULL ORDER BY created_at DESC LIMIT 1);",
+        "additionalFields": {}
+      },
+      "id": "save_ai",
+      "name": "Save AI",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [3800, 400],
+      "credentials": { "postgres": { "id": "1", "name": "Postgres InitCore" } },
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": { "main": [[{ "node": "Extract Data", "type": "main", "index": 0 }]] },
+    "Web API Trigger": { "main": [[{ "node": "Extract Web Data", "type": "main", "index": 0 }]] },
+    "Extract Web Data": { "main": [[{ "node": "Switch API Op", "type": "main", "index": 0 }]] },
+    "Switch API Op": {
+      "main": [
+        [{ "node": "API Publish Prop", "type": "main", "index": 0 }],
+        [{ "node": "API AI Extract", "type": "main", "index": 0 }]
+      ]
+    },
+    "API Publish Prop": { "main": [[{ "node": "Web API Response", "type": "main", "index": 0 }]] },
+    "API AI Extract": { "main": [[{ "node": "Parse API Filters", "type": "main", "index": 0 }]] },
+    "Parse API Filters": { "main": [[{ "node": "API Query Props", "type": "main", "index": 0 }]] },
+    "API Query Props": { "main": [[{ "node": "Web API Response", "type": "main", "index": 0 }]] },
+    "Extract Data": { "main": [[{ "node": "Save User Message", "type": "main", "index": 0 }]] },
+    "Save User Message": { "main": [[{ "node": "Get Memory", "type": "main", "index": 0 }]] },
+    "Get Memory": { "main": [[{ "node": "Prepare Context", "type": "main", "index": 0 }]] },
+    "Prepare Context": { "main": [[{ "node": "Classify Intent", "type": "main", "index": 0 }]] },
+    "Classify Intent": { "main": [[{ "node": "Parse Intent", "type": "main", "index": 0 }]] },
+    "Parse Intent": { "main": [[{ "node": "get_user_state", "type": "main", "index": 0 }]] },
+    "get_user_state": { "main": [[{ "node": "wizard_logic", "type": "main", "index": 0 }]] },
+    "wizard_logic": { "main": [[{ "node": "if_wizard_done", "type": "main", "index": 0 }]] },
+    "if_wizard_done": { "main": [[{ "node": "query_properties", "type": "main", "index": 0 }]] },
+    "query_properties": { "main": [[{ "node": "save_ai", "type": "main", "index": 0 }]] },
+    "save_ai": { "main": [[{ "node": "send_telegram", "type": "main", "index": 0 }]] }
+  }
+}

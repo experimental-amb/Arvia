@@ -1,0 +1,403 @@
+{
+  "name": "90 - LLM Handler v1.1 (SKIP LOCKED + DLQ)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "trigger",
+      "name": "Cron 15s",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        200,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH picked AS (\\n  SELECT hash FROM initcore_messages\\n  WHERE status IN ('processing','error')\\n    AND (next_retry_at IS NULL OR next_retry_at <= NOW())\\n    AND retry_count < 5\\n  ORDER BY created_at ASC\\n  LIMIT 10 FOR UPDATE SKIP LOCKED\\n)\\nUPDATE initcore_messages m SET updated_at=NOW()\\n  FROM picked p\\n WHERE m.hash = p.hash\\nRETURNING m.message_id, m.sender_id, m.channel, m.text, m.hash, m.retry_count;",
+        "options": {}
+      },
+      "id": "pg-claim",
+      "name": "Claim batch (SKIP LOCKED)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        420,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split",
+      "name": "1 a 1",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        640,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyContentJson": "={\n  \"model\": \"gpt-4o-mini\",\n  \"temperature\": 0,\n  \"max_tokens\": 60,\n  \"response_format\": {\"type\":\"json_object\"},\n  \"messages\": [\n    {\"role\":\"system\",\"content\":\"Classify a customer message. Reply JSON only: {intent, is_spam, should_respond}. intent: sales|support|billing|cancel|thanks|spam|other. is_spam/should_respond: bool. Thanks/confirmations => should_respond:false.\"},\n    {\"role\":\"user\",\"content\": {{ JSON.stringify($json.text) }} }\n  ]\n}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "id": "http-intent",
+      "name": "Clasificar intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        860,
+        320
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 1500,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "const base = $('1 a 1').item.json;\nlet intent = 'other', is_spam = false, should_respond = true;\ntry {\n  const txt = $input.first().json?.choices?.[0]?.message?.content;\n  if(txt) {\n    const p = JSON.parse(txt);\n    intent = p.intent || intent;\n    is_spam = !!p.is_spam;\n    should_respond = p.should_respond !== false;\n  }\n} catch(e) {}\nconst skip = is_spam || !should_respond;\nreturn [{ json: { ...base, intent, is_spam, should_respond, skip_to_end: skip } }];"
+      },
+      "id": "fn-merge-intent",
+      "name": "Parsear intent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.skip_to_end }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "if-intent",
+      "name": "¿Responder?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyContentJson": "={\n  \"model\": \"claude-haiku-4-5-20251001\",\n  \"max_tokens\": 400,\n  \"system\": \"Customer support reply. Intent: {{ $json.intent }}.\",\n  \"messages\": [{\"role\":\"user\",\"content\": {{ JSON.stringify($json.text) }} }]\n}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "id": "http-llm",
+      "name": "Anthropic (haiku)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1520,
+        220
+      ],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "const msg = $('Parsear intent').first().json;\nconst res = $input.first().json;\nconst reply = res?.content?.[0]?.text || '';\nconst rawStatic = null;\nconst staticResponse = rawStatic === '' ? null : rawStatic;\nconst finalResponse = staticResponse ?? reply;\n\nreturn [{ json: {\n  hash: msg.hash,\n  status: 'completed',\n  response: JSON.stringify({ \"reply\": finalResponse })\n}}];"
+      },
+      "id": "fn-format",
+      "name": "Formatear respuesta LLM",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const msg = $input.first().json;\nconst rawStatic = msg.is_spam ? 'Mensaje clasificado como spam' : 'Sin respuesta necesaria';\nconst staticResponse = rawStatic === '' ? null : rawStatic;\nconst finalResponse = staticResponse ?? null;\nreturn [{ json: {\n  hash: msg.hash,\n  status: 'skipped',\n  response: JSON.stringify({ \"reply\": finalResponse, \"reason\": rawStatic })\n}}];"
+      },
+      "id": "fn-skip",
+      "name": "Formatear Skip",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const msg = $('Parsear intent').first().json;\nconst err = $input.first().json?.error || {};\nconst errObj = {\n  status: \"error\",\n  error: {\n    type: \"llm_failure\",\n    message: String(err.message || 'Error').substring(0,250),\n    source: \"anthropic\",\n    timestamp: new Date().toISOString()\n  }\n};\nconst next_retry_at = new Date(Date.now() + Math.min(3600000, 60000 * Math.pow(2, msg.retry_count || 0))).toISOString();\nreturn [{ json: {\n  hash: msg.hash,\n  status: 'error',\n  retry_count: (msg.retry_count || 0) + 1,\n  next_retry_at,\n  response: JSON.stringify(errObj)\n}}];"
+      },
+      "id": "fn-error",
+      "name": "Formatear Error",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1740,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE initcore_messages SET status=$1, response=$2::jsonb, updated_at=NOW() WHERE hash=$3;",
+        "additionalFields": {
+          "queryParams": "={{ $json.status }},={{ $json.response }},={{ $json.hash }}"
+        },
+        "options": {}
+      },
+      "id": "pg-update",
+      "name": "Actualizar initcore_messages",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        2060,
+        320
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE initcore_messages SET status=$1, response=$2::jsonb, retry_count=$3, next_retry_at=$4, updated_at=NOW() WHERE hash=$5;",
+        "additionalFields": {
+          "queryParams": "={{ $json.status }},={{ $json.response }},={{ $json.retry_count }},={{ $json.next_retry_at }},={{ $json.hash }}"
+        },
+        "options": {}
+      },
+      "id": "pg-update-err",
+      "name": "Actualizar initcore_messages (Error)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1960,
+        620
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Cron 15s": {
+      "main": [
+        [
+          {
+            "node": "Claim batch (SKIP LOCKED)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim batch (SKIP LOCKED)": {
+      "main": [
+        [
+          {
+            "node": "1 a 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1 a 1": {
+      "main": [
+        [
+          {
+            "node": "Clasificar intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificar intent": {
+      "main": [
+        [
+          {
+            "node": "Parsear intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear intent": {
+      "main": [
+        [
+          {
+            "node": "¿Responder?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Responder?": {
+      "main": [
+        [
+          {
+            "node": "Anthropic (haiku)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatear Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic (haiku)": {
+      "main": [
+        [
+          {
+            "node": "Formatear respuesta LLM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Formatear Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Skip": {
+      "main": [
+        [
+          {
+            "node": "Actualizar initcore_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear respuesta LLM": {
+      "main": [
+        [
+          {
+            "node": "Actualizar initcore_messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear Error": {
+      "main": [
+        [
+          {
+            "node": "Actualizar initcore_messages (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "1.1.0",
+  "meta": {
+    "description": "Handler v1.1: claim atómico con FOR UPDATE SKIP LOCKED (escala a N workers sin duplicación), prioridad asc + FIFO, modelo claude-haiku-4-5 (4x más barato que sonnet), system prompt compacto usando intent ya calculado, retry exponencial y DLQ a 5 fallos."
+  },
+  "id": "initcore-90-llm-v11",
+  "tags": [
+    {
+      "name": "initcore"
+    },
+    {
+      "name": "llm"
+    },
+    {
+      "name": "v1.1"
+    }
+  ]
+}

@@ -1,0 +1,265 @@
+{
+  "name": "05 - API Adapter (Bearer + Rate Limit)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "initcore/api",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "wh-api-entry",
+      "name": "Webhook API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        220,
+        320
+      ],
+      "webhookId": "initcore-api-v1"
+    },
+    {
+      "parameters": {
+        "functionCode": "// ============================================================\n// InitCore v1.0 — API Adapter\n// Autentica por Bearer token y aplica rate limiting simple\n// mediante una tabla en memoria (staticData del workflow).\n// Para producción seria, mover el rate limit a Redis.\n// ============================================================\n\nconst headers = $input.first().json.headers || {};\nconst auth = headers['authorization'] || headers['Authorization'] || '';\nif (!auth.startsWith('Bearer ')) {\n  return [{ json: { valid: false, reason: 'Falta Authorization Bearer', status: 'rejected' } }];\n}\nconst token = auth.replace('Bearer ', '').trim();\n\n// Tokens permitidos — en producción, consultar tabla en BD\nconst allowedTokens = (($env.API_BEARER_TOKENS || '').split(',').map(s => s.trim()).filter(Boolean));\nif (!allowedTokens.includes(token)) {\n  return [{ json: { valid: false, reason: 'Token inválido', status: 'rejected' } }];\n}\n\n// Rate limiting: 100 req/min por token\nconst staticData = $getWorkflowStaticData('global');\nstaticData.rateLimits = staticData.rateLimits || {};\nconst now = Date.now();\nconst windowStart = now - 60 * 1000;\nconst bucket = staticData.rateLimits[token] || [];\nconst recent = bucket.filter(t => t > windowStart);\nrecent.push(now);\nstaticData.rateLimits[token] = recent;\nif (recent.length > 100) {\n  return [{ json: { valid: false, reason: 'Rate limit excedido (100/min)', status: 'rate_limited' } }];\n}\n\nconst body = $input.first().json.body || {};\nif (!body.text || !body.text.trim()) {\n  return [{ json: { valid: false, reason: 'Campo text obligatorio', status: 'rejected' } }];\n}\n\nreturn [{ json: { valid: true, body, token_hint: token.substring(0, 12) + '...' } }];"
+      },
+      "id": "fn-auth-ratelimit",
+      "name": "Auth + rate limit",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        460,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-valid",
+      "name": "¿Autorizado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(String(s),'utf-8').digest('hex');\nconst stripHtml = html => !html ? '' : String(html)\n  .replace(/<script[\\s\\S]*?<\\/script>/gi,'')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi,'')\n  .replace(/<\\/?[^>]+>/g,'')\n  .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<')\n  .replace(/&gt;/gi,'>').replace(/&quot;/gi,'\"').replace(/&#39;|&apos;/gi,\"'\")\n  .replace(/\\s+/g,' ').trim();\nconst normForHash = t => (t||'').toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').replace(/[^\\p{L}\\p{N}]+/gu,' ').replace(/\\s+/g,' ').trim();\n\n// Convertir body de API a formato InitCore\nconst b = $input.first().json.body;\nconst user = b.user || {};\nconst identifier = user.id || user.email || `api-anon-${Date.now()}`;\n\nconst payload = {\n  channel: 'api',\n  message: { text: (b.text || '').substring(0, 5000), media: Array.isArray(b.media) ? b.media : [] },\n  timestamp: b.timestamp || new Date().toISOString(),\n  context: {\n    name: user.name || '',\n    email: user.email || '',\n    phone: user.phone || '',\n    language: (user.language || '').toLowerCase()\n  },\n  metadata: {\n    source: 'api_adapter',\n    adapter_version: '1.0.0',\n    external_user_id: user.id || '',\n    source_app: (b.metadata && b.metadata.source_app) || 'unknown',\n    ...(b.metadata || {}),\n    token_hint: $('Auth + rate limit').first().json.token_hint\n  },\n  status: 'pending',\n  _user_identifier: identifier\n};\nconst message_id = crypto.randomUUID();\nconst sender_id = sha256(payload.channel + ':' + payload._user_identifier);\nconst cleanText = stripHtml(payload.message?.text || '');\nconst mediaFingerprint = (payload.message?.media||[]).map(m => m.url || m.file_id || '').join('|');\nconst hashKey = normForHash(cleanText);\nconst hash = sha256(payload.channel + ':' + sender_id + ':' + (hashKey || mediaFingerprint || message_id));\n\n// Flatten out the response so it is easy to persist to messages table, AND hold the 5 fields\nconst newPayload = {\n  channel: payload.channel,\n  message_id: message_id,\n  sender_id: sender_id,\n  user_id: sender_id, // keep it around for the messages table insert\n  text: cleanText,\n  hash: hash,\n  media: payload.message?.media || [],\n  ts: payload.timestamp || new Date().toISOString(),\n  context: payload.context || {},\n  metadata: payload.metadata || {}\n};\n\nreturn [{ json: newPayload }];\n"
+      },
+      "id": "fn-extract-api",
+      "name": "Extraer datos API",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        940,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": "={{ $env.CORE_NORMALIZATION_WORKFLOW_ID }}",
+        "options": {
+          "waitForExecution": true
+        }
+      },
+      "id": "exec-core",
+      "name": "Ejecutar core_normalization",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        240
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"accepted\",\"message_id\":\"{{ $json.message_id }}\",\"channel\":\"api\"}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "respond-ok",
+      "name": "Responder 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1820,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"status\":\"{{ $json.status }}\",\"reason\":\"{{ $json.reason }}\"}",
+        "options": {
+          "responseCode": "={{ $json.status === 'rate_limited' ? 429 : 401 }}"
+        }
+      },
+      "id": "respond-401",
+      "name": "Responder 401/429",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        940,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "message_id, user_id, channel, text, media, ts, context, metadata",
+        "additionalFields": {}
+      },
+      "id": "exec-core_pg_meta",
+      "name": "Guardar Metadata Adapter",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1160,
+        240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "initcore-postgres",
+          "name": "InitCore PostgreSQL"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const p = $input.first().json;\\nreturn [{ json: { channel: p.channel, message_id: p.message_id, sender_id: p.sender_id, text: p.text, hash: p.hash } }];"
+      },
+      "id": "exec-core_format_core",
+      "name": "Formatear payload Core",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1380,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook API": {
+      "main": [
+        [
+          {
+            "node": "Auth + rate limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth + rate limit": {
+      "main": [
+        [
+          {
+            "node": "¿Autorizado?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Autorizado?": {
+      "main": [
+        [
+          {
+            "node": "Extraer datos API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder 401/429",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer datos API": {
+      "main": [
+        [
+          {
+            "node": "Guardar Metadata Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ejecutar core_normalization": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Metadata Adapter": {
+      "main": [
+        [
+          {
+            "node": "Formatear payload Core",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Formatear payload Core": {
+      "main": [
+        [
+          {
+            "node": "Ejecutar core_normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "1.0.0",
+  "meta": {
+    "description": "InitCore v1.0 — Adapter API con Bearer token + rate limit 100/min por token. Para producción mover el rate limit a Redis."
+  },
+  "id": "initcore-05-api",
+  "tags": [
+    {
+      "name": "initcore"
+    },
+    {
+      "name": "adapter"
+    },
+    {
+      "name": "api"
+    }
+  ]
+}
