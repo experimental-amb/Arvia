@@ -21,7 +21,10 @@ async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
 
   const res = await fetch(API_BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { 
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "69420"
+    },
     body: JSON.stringify({ operation, payload }),
   });
 
