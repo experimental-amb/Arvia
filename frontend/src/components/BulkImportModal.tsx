@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
 import * as XLSX from "xlsx";
 import { FileDown, FileUp, Loader2, CheckCircle2, AlertCircle, UploadCloud } from "lucide-react";
 import {
@@ -60,6 +61,7 @@ function validateRows(rows: any[]): void {
 }
 
 export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
+  const { user } = useAuth();
   const [loading, setLoading]   = useState(false);
   const [status, setStatus]     = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage]   = useState("");
@@ -108,7 +110,7 @@ export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
         validateRows(data);
         setRowCount(data.length);
 
-        await publishBulkProperties(data);
+        await publishBulkProperties(data, user?.uid);
 
         setStatus("success");
         setMessage(`¡${data.length} propiedades importadas correctamente!`);
