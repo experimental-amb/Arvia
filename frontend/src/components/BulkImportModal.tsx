@@ -78,8 +78,11 @@ export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
       const reader = new FileReader();
       reader.onload = async (evt) => {
         try {
-          const bstr = evt.target?.result;
-          const wb = XLSX.read(bstr, { type: "binary" });
+          // Usar ArrayBuffer en vez de BinaryString para soportar UTF-8
+          // (tildes, ñ, etc. en CSV chileno)
+          const arrayBuffer = evt.target?.result as ArrayBuffer;
+          const byteArray = new Uint8Array(arrayBuffer);
+          const wb = XLSX.read(byteArray, { type: "array" });
           const wsname = wb.SheetNames[0];
           const ws = wb.Sheets[wsname];
           const data = XLSX.utils.sheet_to_json(ws);
@@ -110,7 +113,7 @@ export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
           setLoading(false);
         }
       };
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
     } catch (err) {
       setLoading(false);
       setStatus("error");

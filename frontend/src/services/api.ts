@@ -28,10 +28,10 @@ async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
     return mockFallback<T>(operation, payload);
   }
 
-  // T16: Eliminado header ngrok "ngrok-skip-browser-warning"
-  // T16: Añadida autenticación real vía x-api-key
+  // ngrok-skip-browser-warning: requerido para evitar que ngrok intercepte con HTML
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
   };
   if (API_KEY) {
     headers["x-api-key"] = API_KEY;
@@ -43,17 +43,38 @@ async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
     body: JSON.stringify({ operation, payload }),
   });
 
+  // Leer siempre como texto para evitar "Unexpected end of JSON input"
+  // cuando el body es vacío o es HTML (error de ngrok/nginx)
+  const text = await res.text();
+
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
+    let body: any = {};
+    try { body = JSON.parse(text); } catch {}
     const err: ApiError = new Error(
-      (body as any)?.error ?? `API Error: ${res.status}`
+      (body as any)?.error ?? `API Error ${res.status}`
     );
     err.status = res.status;
     err.body = body;
     throw err;
   }
 
-  return res.json() as Promise<T>;
+  if (!text) {
+    throw new Error(
+      "El servidor no envió respuesta. Verifica que el workflow de n8n esté activo y publicado."
+    );
+  }
+
+  if (text.trim().startsWith("<")) {
+    throw new Error(
+      "El servidor devolvió HTML. Verifica que ngrok esté corriendo y que el workflow esté importado en n8n."
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Respuesta inválida del servidor: ${text.slice(0, 120)}`);
+  }
 }
 
 /* --------------------------- API Methods -------------------------- */
