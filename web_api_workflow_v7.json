@@ -1,0 +1,793 @@
+{
+  "name": "Arvia Web Dashboard API v7",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "web-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5",
+      "name": "Web API Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        600
+      ],
+      "webhookId": "a9b0c1d2-e3f4-4a5b-8c7d-e8f9a0b1c2d3"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const raw = $input.first().json;\n  const headers = raw.headers || {};\n  const body = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\n\n  // ── API KEY VALIDATION ──────────────────────────────────────────────────────\n  const EXPECTED_KEY = 'arvia-dev-key-changeme';\n  const receivedKey = headers['x-api-key'] || headers['authorization'] || body.apiKey || '';\n  const cleanKey = String(receivedKey).replace(/^Bearer\\s+/i, '');\n  if (!cleanKey || cleanKey !== EXPECTED_KEY) {\n    return [{ json: { __op: 'error', __error: true, success: false, error: 'AUTH_FAILED: API key invalida o ausente', code: 401 } }];\n  }\n\n  // ── OPERATION ROUTING ───────────────────────────────────────────────────────\n  const operation = String(body.operation || 'ai_search');\n  const VALID_OPS = ['search','ai_search','publish','publish_bulk','get_property','get_stats','toggle_status'];\n  if (!VALID_OPS.includes(operation)) {\n    return [{ json: { __op: 'error', __error: true, success: false, error: 'Operacion desconocida: ' + operation, code: 400 } }];\n  }\n  const payload = (body.payload && typeof body.payload === 'object') ? body.payload : body;\n  return [{ json: { __op: operation, operation, payload, source: 'web', requestedAt: new Date().toISOString() } }];\n} catch(e) {\n  return [{ json: { __op: 'error', __error: true, success: false, error: e.message, code: 500 } }];\n}"
+      },
+      "id": "b2c3d4e5-f6a7-4b8c-9d0e-f1a2b3c4d5e6",
+      "name": "Extract Web Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        600
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "publish",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "ai_search",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "33333333-3333-4333-8333-333333333333",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "publish_bulk",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "44444444-4444-4444-8444-444444444444",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "get_property",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "55555555-5555-4555-8555-555555555555",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "get_stats",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "66666666-6666-4666-8666-666666666666",
+                    "leftValue": "={{ $json.operation }}",
+                    "rightValue": "toggle_status",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "c3d4e5f6-a7b8-4c9d-ae1f-a2b3c4d5e6f7",
+      "name": "Switch API Op",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        500,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const p = $input.first().json.payload;\n  if (!p || !p.title || !p.comuna) throw new Error('VALIDATION: title y comuna son obligatorios.');\n  const price = parseFloat(p.price);\n  if (isNaN(price) || price <= 0) throw new Error('VALIDATION: price debe ser mayor a 0.');\n  const userId = p.userId || null;\n  return [{ json: { title:String(p.title).slice(0,255), description:String(p.description||'').slice(0,2000), price, region:String(p.region||''), comuna:String(p.comuna), address:String(p.address||''), bedrooms:Math.max(0,parseInt(p.bedrooms)||0), bathrooms:Math.max(0,parseInt(p.bathrooms)||0), sqm:parseFloat(p.sqm)||0, source_url:p.source_url?String(p.source_url):null, source:'web_dashboard', user_id: userId } }];\n} catch(e) {\n  return [{ json: { __error: true, success: false, error: e.message, code: 400 } }];\n}"
+      },
+      "id": "e5f6a7b8-c9d0-4e1f-8a3b-c4d5e6f7a8b9",
+      "name": "Validar Publish",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        200
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO properties (title,description,price,region,comuna,address,bedrooms,bathrooms,sqm,source_url,source,user_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (source_url) DO UPDATE SET title=EXCLUDED.title,price=EXCLUDED.price,updated_at=NOW() RETURNING id,title,price,comuna;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$json.title,$json.description,$json.price,$json.region,$json.comuna,$json.address,$json.bedrooms,$json.bathrooms,$json.sqm,$json.source_url,$json.source,$json.user_id]) }}"
+        }
+      },
+      "id": "f6a7b8c9-d0e1-4f2a-9b4c-d5e6f7a8b9c0",
+      "name": "API Publish Prop",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1000,
+        200
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const raw = $input.first().json.payload;\n  const userId = raw.userId || null;\n  const items = Array.isArray(raw.properties) ? raw.properties : Array.isArray(raw) ? raw : [];\n  if (items.length === 0) throw new Error('BULK_EMPTY: El lote esta vacio.');\n  if (items.length > 1000) throw new Error('BULK_TOO_LARGE: Maximo 1000 propiedades.');\n\n  const REQUIRED = ['title','comuna','price'];\n  const valid = []; const skipped = [];\n  for (const [i,p] of items.entries()) {\n    const missing = REQUIRED.filter(k => !p[k]);\n    if (missing.length) { skipped.push({row:i+1,reason:'Faltan: '+missing.join(', ')}); continue; }\n    const price = parseFloat(p.price);\n    if (isNaN(price)||price<=0) { skipped.push({row:i+1,reason:'price invalido'}); continue; }\n    valid.push({\n      title:       String(p.title).slice(0,255),\n      description: String(p.description||'').slice(0,2000),\n      price,\n      region:      String(p.region||''),\n      comuna:      String(p.comuna),\n      address:     String(p.address||''),\n      bedrooms:    Math.max(0,parseInt(p.bedrooms)||0),\n      bathrooms:   Math.max(0,parseInt(p.bathrooms)||0),\n      sqm:         parseFloat(p.sqm)||0,\n      source_url:  p.source_url ? String(p.source_url) : null,\n      source:      'bulk_import',\n      user_id:     userId\n    });\n  }\n  if (valid.length === 0) throw new Error(\n    'BULK_ALL_INVALID: Ninguna fila paso la validacion. Filas omitidas: ' + JSON.stringify(skipped.slice(0,5))\n  );\n\n  // Build parallel arrays for UNNEST batch insert (single DB round-trip)\n  const batch = {\n    titles:       valid.map(p => p.title),\n    descriptions: valid.map(p => p.description),\n    prices:       valid.map(p => p.price),\n    regions:      valid.map(p => p.region),\n    comunas:      valid.map(p => p.comuna),\n    addresses:    valid.map(p => p.address),\n    bedrooms:     valid.map(p => p.bedrooms),\n    bathrooms:    valid.map(p => p.bathrooms),\n    sqms:         valid.map(p => p.sqm),\n    source_urls:  valid.map(p => p.source_url),\n    sources:      valid.map(p => p.source),\n    user_ids:     valid.map(p => p.user_id),\n    total:        valid.length,\n    skipped:      skipped\n  };\n  return [{ json: batch }];\n} catch(e) {\n  return [{ json: { __error: true, success: false, error: e.message, code: 400 } }];\n}"
+      },
+      "id": "a7b8c9d0-e1f2-4a3b-8c5d-e6f7a8b9c0d1",
+      "name": "Extract Bulk Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        450
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO properties\n  (title, description, price, region, comuna, address,\n   bedrooms, bathrooms, sqm, source_url, source, user_id)\nSELECT\n  t.title, t.description, t.price::numeric, t.region, t.comuna, t.address,\n  t.bedrooms::int, t.bathrooms::int, t.sqm::numeric, t.source_url, t.source, t.user_id\nFROM UNNEST(\n  $1::text[], $2::text[], $3::numeric[], $4::text[], $5::text[], $6::text[],\n  $7::int[], $8::int[], $9::numeric[], $10::text[], $11::text[], $12::text[]\n) AS t(title, description, price, region, comuna, address,\n       bedrooms, bathrooms, sqm, source_url, source, user_id)\nON CONFLICT (source_url) DO UPDATE\n  SET title=EXCLUDED.title, price=EXCLUDED.price, updated_at=NOW()\n  WHERE properties.source_url IS NOT NULL\nRETURNING id;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$json.titles,$json.descriptions,$json.prices,$json.regions,$json.comunas,$json.addresses,$json.bedrooms,$json.bathrooms,$json.sqms,$json.source_urls,$json.sources,$json.user_ids]) }}"
+        }
+      },
+      "id": "b8c9d0e1-f2a3-4b4c-9d6e-f7a8b9c0d1e2",
+      "name": "API Bulk Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1000,
+        450
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\n// With UNNEST, we get one item per returned row id\n// But our Extract Bulk Items node now returns a single item with skipped info\n// Check for errors first\nconst errItem = results.find(r => r.json.__error || (r.json.error && !r.json.id));\nif (errItem) {\n  return [{ json: { success: false, error: errItem.json.error || 'Error en bulk insert', code: errItem.json.code || 500 } }];\n}\nconst ids = results.map(r => r.json.id).filter(Boolean);\nreturn [{ json: { success: true, data: { inserted: ids.length, ids } } }];"
+      },
+      "id": "c9d0e1f2-a3b4-4c5d-ae7f-a8b9c0d1e2f3",
+      "name": "Agregar Resultados Bulk",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1250,
+        450
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{ $vars.ANTHROPIC_API_KEY || $env.ANTHROPIC_API_KEY || '' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-3-haiku-20240307', max_tokens: 512, system: \"Eres un asistente inmobiliario chileno. Extrae filtros de b\\u00fasqueda del prompt del usuario. Devuelve SOLO un objeto JSON v\\u00e1lido con estos campos: {\\\"region\\\":string|null,\\\"comuna\\\":string|null,\\\"bedrooms\\\":int|null,\\\"bathrooms\\\":int|null,\\\"max_price\\\":int|null,\\\"property_type\\\":\\\"departamento\\\"|\\\"casa\\\"|null,\\\"transaction_type\\\":\\\"venta\\\"|\\\"arriendo\\\"|null}. Si el usuario pide sus propias propiedades, devuelve un JSON vac\\u00edo {}.\", messages: [{ role: 'user', content: $json.payload?.prompt || 'mis propiedades' }] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "c1a2u3d4-e5a6-4b7c-8d9e-f0g1h2i3j4k5",
+      "name": "Claude AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        600
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-cred-id",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ !!$json.__error || !$json.content || !$json.content?.[0]?.text }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "f1a2l3l4-b5a6-4c7d-8e9f-g0h1i2j3k4l5",
+      "name": "Should Fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        900,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model:'hermes3:8b', system:'Eres un asistente inmobiliario chileno. Extrae filtros. Devuelve SOLO JSON valido: {\"region\":string|null,\"comuna\":string|null,\"bedrooms\":int|null,\"bathrooms\":int|null,\"max_price\":int|null,\"property_type\":\"departamento\"|\"casa\"|null,\"transaction_type\":\"venta\"|\"arriendo\"|null}', prompt:$node[\"Extract Web Data\"].json.payload.prompt||'propiedades disponibles', stream:false, options:{temperature:0.1} }) }}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "e7f8a9b0-c1d2-4e3f-8a9b-c0d1e2f3a4b5",
+      "name": "Hermes Fallback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        750
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "let filters = {};\ntry {\n  // httpRequest Anthropic API: { content: [{type:'text', text:'...'}] }\n  // Hermes fallback: { response: '...' } or { text: '...' }\n  const claudeText = $input.first().json.content?.[0]?.text || '';\n  const raw = claudeText || $input.first().json.response || $input.first().json.text || '';\n  const m = raw.match(/\\{[^{}]*\\}/s);\n  if (m) filters = JSON.parse(m[0]);\n} catch(e) {}\nconst userId = $node[\"Extract Web Data\"].json.payload?.userId || null;\nreturn [{ json: { filters: {\n  region:           typeof filters.region==='string'          ? filters.region.trim()   : null,\n  comuna:           typeof filters.comuna==='string'          ? filters.comuna.trim()   : null,\n  bedrooms:         Number.isInteger(filters.bedrooms)        ? Math.max(0,filters.bedrooms) : null,\n  bathrooms:        Number.isInteger(filters.bathrooms)       ? Math.max(0,filters.bathrooms): null,\n  max_price:        typeof filters.max_price==='number'       ? filters.max_price       : null,\n  property_type:    ['departamento','casa'].includes(filters.property_type) ? filters.property_type : null,\n  transaction_type: ['venta','arriendo'].includes(filters.transaction_type) ? filters.transaction_type : null,\n  user_id: userId\n} } }];"
+      },
+      "id": "e1f2a3b4-c5d6-4e7f-8a9b-c0d1e2f3a4b5",
+      "name": "Parse API Filters",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        700
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id,title,description,price,region,comuna,address,bedrooms,bathrooms,sqm,images,status,property_type,transaction_type,created_at FROM properties WHERE status='published' AND ($1::text IS NULL OR region ILIKE '%'||$1||'%') AND ($2::text IS NULL OR comuna ILIKE '%'||$2||'%') AND ($3::int IS NULL OR bedrooms>=$3) AND ($4::int IS NULL OR bathrooms>=$4) AND ($5::numeric IS NULL OR price<=$5) AND ($6::text IS NULL OR property_type=$6) AND ($7::text IS NULL OR transaction_type=$7) AND ($8::text IS NULL OR user_id=$8) ORDER BY created_at DESC LIMIT 20;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$json.filters.region||null,$json.filters.comuna||null,$json.filters.bedrooms||null,$json.filters.bathrooms||null,$json.filters.max_price||null,$json.filters.property_type||null,$json.filters.transaction_type||null,$json.filters.user_id||null]) }}"
+        }
+      },
+      "id": "f2a3b4c5-d6e7-4f8a-9b0c-d1e2f3a4b5c6",
+      "name": "API Query Props",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1250,
+        700
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id,title,description,price,region,comuna,address,bedrooms,bathrooms,sqm,images,status,property_type,transaction_type,created_at FROM properties WHERE id=$1 AND status='published' LIMIT 1;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$json.payload.id]) }}"
+        }
+      },
+      "id": "a3b4c5d6-e7f8-4a9b-8c1d-e2f3a4b5c6d7",
+      "name": "API Get Property",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        750,
+        950
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT (SELECT COUNT(*) FROM properties) AS \"totalProperties\", (SELECT COUNT(*) FROM properties WHERE status='published') AS \"publishedProperties\", COALESCE((SELECT COUNT(*) FROM leads),0) AS \"totalLeads\", COALESCE((SELECT COUNT(*) FROM messages WHERE processed=false),0) AS \"pendingMessages\";"
+      },
+      "id": "b4c5d6e7-f8a9-4b0c-9d2e-f3a4b5c6d7e8",
+      "name": "API Get Stats",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        750,
+        1150
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(i => i.json);\nconst errItem = items.find(i => i.__error || (i.error && typeof i.error === 'string' && i.error.length > 0));\nif (errItem) {\n  return [{ json: { success: false, error: errItem.error || 'Error desconocido', code: errItem.code || 500, timestamp: new Date().toISOString() } }];\n}\nconst single = items.length === 1 ? items[0] : null;\nreturn [{ json: { success: true, data: items.length===1 ? single : items, count: items.length, timestamp: new Date().toISOString() } }];"
+      },
+      "id": "c5d6e7f8-a9b0-4c1d-ae3f-a4b5c6d7e8f9",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        650
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "responseCode": 200,
+        "options": {}
+      },
+      "id": "f8a9b0c1-d2e3-4f4a-9b6c-d7e8f9a0b1c2",
+      "name": "Web API Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1750,
+        650
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { success: false, error: 'Operacion no reconocida', code: 400 } }];"
+      },
+      "id": "d4e5f6a7-b8c9-4d0e-bf2a-b3c4d5e6f7a8",
+      "name": "Op Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        1350
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  const p = $input.first().json.payload;\n  if (!p.id) throw new Error('VALIDATION: id es obligatorio.');\n  const validStatuses = ['published', 'draft', 'archived'];\n  if (!validStatuses.includes(p.status)) throw new Error('VALIDATION: status invalido. Use: ' + validStatuses.join(', '));\n  return [{ json: { id: String(p.id), status: p.status, user_id: p.userId || null } }];\n} catch(e) {\n  return [{ json: { __error: true, success: false, error: e.message, code: 400 } }];\n}"
+      },
+      "id": "g9h0i1j2-k3l4-4m5n-8p6q-r7s8t9u0v1w2",
+      "name": "Validar Toggle Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        1550
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE properties SET status=$1, updated_at=NOW() WHERE id=$2::bigint AND (user_id=$3 OR $3 IS NULL) RETURNING id, title, status;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$json.status, $json.id, $json.user_id]) }}"
+        }
+      },
+      "id": "h0i1j2k3-l4m5-4n6o-8q8r-s9t0u1v2w3x4",
+      "name": "API Toggle Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1000,
+        1550
+      ],
+      "continueOnFail": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Web API Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Web Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Web Data": {
+      "main": [
+        [
+          {
+            "node": "Switch API Op",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch API Op": {
+      "main": [
+        [
+          {
+            "node": "Validar Publish",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claude AI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Bulk Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API Get Property",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API Get Stats",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Op Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Validar Toggle Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Publish": {
+      "main": [
+        [
+          {
+            "node": "API Publish Prop",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Publish Prop": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Bulk Items": {
+      "main": [
+        [
+          {
+            "node": "API Bulk Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Bulk Insert": {
+      "main": [
+        [
+          {
+            "node": "Agregar Resultados Bulk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agregar Resultados Bulk": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude AI": {
+      "main": [
+        [
+          {
+            "node": "Should Fallback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Fallback?": {
+      "main": [
+        [
+          {
+            "node": "Hermes Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse API Filters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hermes Fallback": {
+      "main": [
+        [
+          {
+            "node": "Parse API Filters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse API Filters": {
+      "main": [
+        [
+          {
+            "node": "API Query Props",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Query Props": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Get Property": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Get Stats": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Op Fallback": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Web API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Toggle Status": {
+      "main": [
+        [
+          {
+            "node": "API Toggle Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API Toggle Status": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "f7a8b9c0-d1e2-4f3a-bf5c-d6e7f8a9b0c1",
+  "meta": {
+    "instanceId": "arvia-web-api-v7"
+  },
+  "tags": []
+}

@@ -1,21 +1,20 @@
 import type { Property, SearchFilters, SearchResult } from "@/types/property";
 
 /**
- * API client - todas las peticiones van al proxy Next.js /api/n8n.
- * El proxy reenvía al webhook de n8n (server-to-server, sin CORS).
- *
- * IMPORTANTE: n8n v6 envuelve TODAS las respuestas exitosas en:
- *   { success: true, data: <payload>, count: N, timestamp: "..." }
- * Cada método desenvuelve explícitamente con unwrapN8n().
+ * API client for the InitCore backend (n8n Web API branch).
+ * All requests are routed through a unified webhook endpoint.
  */
 
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+const API_KEY  = process.env.NEXT_PUBLIC_API_KEY ?? "";
+const USE_MOCK = !API_BASE || process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
 export interface ApiError extends Error {
   status?: number;
   body?: unknown;
 }
 
+// T19: Tipado de las estadísticas del dashboard
 export interface DashboardStats {
   totalProperties: number;
   publishedProperties: number;
@@ -23,114 +22,81 @@ export interface DashboardStats {
   pendingMessages: number;
 }
 
-// Core request
-
 async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
   if (USE_MOCK) {
-    console.warn("Mock Data activo");
+    console.warn("Using Mock Data - Configura NEXT_PUBLIC_API_BASE_URL para usar la API real");
     return mockFallback<T>(operation, payload);
   }
 
-  const res = await fetch("/api/n8n", {
+  // T16: Eliminado header ngrok "ngrok-skip-browser-warning"
+  // T16: Añadida autenticación real vía x-api-key
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (API_KEY) {
+    headers["x-api-key"] = API_KEY;
+  }
+
+  const res = await fetch(API_BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ operation, payload }),
   });
 
-  const text = await res.text();
-
   if (!res.ok) {
-    let body: any = {};
-    try { body = JSON.parse(text); } catch (_e) { /* ignore */ }
-    const err: ApiError = new Error((body as any)?.error ?? `API Error ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    const err: ApiError = new Error(
+      (body as any)?.error ?? `API Error: ${res.status}`
+    );
     err.status = res.status;
     err.body = body;
     throw err;
   }
 
-  try {
-    return JSON.parse(text) as T;
-  } catch (_e) {
-    throw new Error(`Respuesta invalida del servidor: ${text.slice(0, 120)}`);
-  }
+  return res.json() as Promise<T>;
 }
 
-function unwrapN8n<T>(raw: any): T {
-  if (raw && typeof raw === "object" && "success" in raw && "data" in raw) {
-    return raw.data as T;
-  }
-  return raw as T;
-}
-
-function toArray<T>(val: any): T[] {
-  if (Array.isArray(val)) return val;
-  if (val && typeof val === "object") return [val];
-  return [];
-}
-
-// API Methods
+/* --------------------------- API Methods -------------------------- */
 
 export async function searchProperties(filters: SearchFilters): Promise<SearchResult> {
-  const res = await n8nRequest<any>("ai_search", { prompt: filters.q || "todas" });
-  const items = toArray<Property>(unwrapN8n(res));
+  const items = await n8nRequest<Property[]>("ai_search", { prompt: filters.q || "todas" });
   return {
     items,
     total: items.length,
     query: filters.q ?? "",
-    aiSummary: `Encontre ${items.length} propiedades.`,
+    aiSummary: `Encontré ${items.length} propiedades reales en la base de datos.`
   };
 }
 
+// T17: Corregido — usa operación dedicada get_property en lugar de ai_search con prompt hack
 export async function getProperty(id: string): Promise<Property | null> {
-  const res = await n8nRequest<any>("get_property", { id });
-  const data = unwrapN8n<any>(res);
-  return toArray<Property>(data)[0] ?? null;
+  const result = await n8nRequest<Property | null>("get_property", { id });
+  return result ?? null;
 }
 
 export async function publishProperty(input: any): Promise<Property> {
-  const res = await n8nRequest<any>("publish", input);
-  const data = unwrapN8n<any>(res);
-  return { ...input, id: String(data?.id ?? data) };
+  const result = await n8nRequest<{ id: number }>("publish", input);
+  return { ...input, id: String(result.id) };
 }
 
-export async function publishBulkProperties(
-  properties: any[],
-  userId?: string
-): Promise<{ count: number }> {
-  const res = await n8nRequest<any>("publish_bulk", { properties, userId });
-  const data = unwrapN8n<any>(res);
-  return { count: Number(data?.inserted ?? data?.count ?? properties.length) };
+export async function publishBulkProperties(properties: any[]): Promise<{ count: number }> {
+  return n8nRequest<{ count: number }>("publish_bulk", { properties });
 }
 
 export async function getDashboardProperties(userId?: string): Promise<Property[]> {
-  const res = await n8nRequest<any>("ai_search", { prompt: "mis propiedades", userId });
-  return toArray<Property>(unwrapN8n(res));
+  return n8nRequest<Property[]>("ai_search", { prompt: "mis propiedades" });
 }
 
+// T19: Nueva función — obtiene métricas reales del backend
 export async function getStats(): Promise<DashboardStats> {
-  const res = await n8nRequest<any>("get_stats", {});
-  const raw = unwrapN8n<any>(res);
-  return {
-    totalProperties:     Number(raw?.totalProperties     ?? 0),
-    publishedProperties: Number(raw?.publishedProperties ?? 0),
-    totalLeads:          Number(raw?.totalLeads          ?? 0),
-    pendingMessages:     Number(raw?.pendingMessages     ?? 0),
-  };
+  return n8nRequest<DashboardStats>("get_stats", {});
 }
 
-export async function togglePropertyStatus(
-  id: string,
-  status: "published" | "draft",
-  userId?: string
-): Promise<void> {
-  await n8nRequest("toggle_status", { id, status, userId });
+export async function aiChat(message: string) {
+  return { reply: "Conectado al asistente web. ¿En qué puedo ayudarte?" };
 }
 
-export async function aiChat(_message: string) {
-  return { reply: "Conectado al asistente web." };
-}
-
-// Mock Fallbacks
+/* --------------------------- Mock Fallbacks ----------------------- */
 async function mockFallback<T>(op: string, _payload: any): Promise<T> {
   if (op === "get_stats") {
     return {
