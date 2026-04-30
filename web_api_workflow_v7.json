@@ -282,7 +282,7 @@
             },
             {
               "name": "x-api-key",
-              "value": "={{ $vars.ANTHROPIC_API_KEY || $env.ANTHROPIC_API_KEY || '' }}"
+              "value": "PEGAR_API_KEY_AQUI"
             }
           ]
         },
