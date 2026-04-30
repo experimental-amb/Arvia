@@ -1,9 +1,17 @@
 /**
- * Property contract — mirrors the InitCore `properties` table.
- * Matches columns in init.sql: id, user_id, title, description, price, region,
- * comuna, address, bedrooms, bathrooms, sqm, images JSONB, created_at.
+ * Property contract — espeja la tabla `properties` de PostgreSQL.
+ *
+ * Status en DB:  published | draft | archived
+ * (legacy frontend usaba: active | draft | sold | reserved)
+ * Mantenemos ambos sets para compatibilidad, mapeando published → active.
  */
-export type PropertyStatus = "active" | "draft" | "sold" | "reserved";
+export type PropertyStatus =
+  | "published"   // visible en el portal (DB value)
+  | "draft"       // oculta / borrador (DB value)
+  | "archived"    // archivada (DB value)
+  | "active"      // alias legacy de "published"
+  | "sold"
+  | "reserved";
 
 export interface Property {
   id: string;
@@ -20,8 +28,9 @@ export interface Property {
   sqm: number;
   images: string[];
   status?: PropertyStatus;
+  property_type?: "departamento" | "casa" | "terreno" | "comercial" | "otro";
+  transaction_type?: "venta" | "arriendo";
   createdAt?: string;
-  /** Optional hints surfaced in AI-generated cards. */
   aiSummary?: string;
   tags?: string[];
 }
@@ -29,19 +38,4 @@ export interface Property {
 export interface SearchFilters {
   q?: string;
   region?: string;
-  comuna?: string;
-  minPrice?: number;
-  maxPrice?: number;
-  bedrooms?: number;
-  bathrooms?: number;
-  minSqm?: number;
-  maxSqm?: number;
-}
-
-export interface SearchResult {
-  items: Property[];
-  total: number;
-  query: string;
-  /** AI-crafted summary of results (from n8n / LLM). */
-  aiSummary?: string;
-}
+  comuna?: 

@@ -191,47 +191,4 @@ export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
               {sublabel && (
                 <p className="text-xs text-muted-foreground">{sublabel}</p>
               )}
-            </div>
-
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="absolute inset-0 w-full h-full opacity-0 disabled:cursor-not-allowed"
-              style={{ cursor: loading ? "wait" : "pointer" }}
-              onChange={handleFileUpload}
-              disabled={loading || status === "success"}
-            />
-          </label>
-
-          {/* Mensaje de error o éxito */}
-          {message && (
-            <div
-              className={`text-xs text-center px-3 py-2 rounded-xl whitespace-pre-wrap ${
-                status === "success"
-                  ? "bg-emerald-500/10 text-emerald-300"
-                  : "bg-red-500/10 text-red-300"
-              }`}
-            >
-              {message}
-            </div>
-          )}
-
-          {/* Plantilla */}
-          <div className="flex flex-col gap-1.5">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Plantilla
-            </h4>
-            <a
-              href="/plantilla_arvia.csv"
-              download
-              className="flex items-center gap-2 text-sm text-[hsl(var(--brand))] hover:underline w-fit"
-            >
-              <FileDown className="h-4 w-4" />
-              Descargar plantilla base (.csv)
-            </a>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+            </di

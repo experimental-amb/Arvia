@@ -1,15 +1,12 @@
 import type { Property, SearchFilters, SearchResult } from "@/types/property";
 
 /**
- * API client for the InitCore backend (n8n Web API branch).
+ * API client — todas las peticiones van al proxy Next.js /api/n8n.
+ * El proxy reenvía al webhook de n8n (server-to-server, sin CORS).
  *
- * Todas las peticiones van a /api/n8n — un proxy Next.js que reenvía al
- * webhook de n8n server-to-server. Esto elimina los errores CORS del browser
- * que ocurren cuando el frontend (Vercel) intenta llamar directamente a ngrok.
- *
- * Variables de entorno necesarias en Vercel (server-side, sin NEXT_PUBLIC_):
- *   N8N_WEBHOOK_URL  — URL completa del webhook de n8n
- *   N8N_API_KEY      — API key para el workflow (opcional)
+ * IMPORTANTE: n8n v6 envuelve TODAS las respuestas exitosas en:
+ *   { success: true, data: <payload>, count: N, timestamp: "..." }
+ * Cada método desenvuelve explícitamente con unwrapN8n().
  */
 
 const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
@@ -19,7 +16,6 @@ export interface ApiError extends Error {
   body?: unknown;
 }
 
-// T19: Tipado de las estadísticas del dashboard
 export interface DashboardStats {
   totalProperties: number;
   publishedProperties: number;
@@ -27,13 +23,14 @@ export interface DashboardStats {
   pendingMessages: number;
 }
 
+// ─── Core request ────────────────────────────────────────────────────────────
+
 async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
   if (USE_MOCK) {
     console.warn("Mock Data activo — configura N8N_WEBHOOK_URL en Vercel para datos reales");
     return mockFallback<T>(operation, payload);
   }
 
-  // Llamamos al proxy Next.js en /api/n8n (mismo origen → sin CORS)
   const res = await fetch("/api/n8n", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -45,9 +42,7 @@ async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
   if (!res.ok) {
     let body: any = {};
     try { body = JSON.parse(text); } catch {}
-    const err: ApiError = new Error(
-      (body as any)?.error ?? `API Error ${res.status}`
-    );
+    const err: ApiError = new Error((body as any)?.error ?? `API Error ${res.status}`);
     err.status = res.status;
     err.body = body;
     throw err;
@@ -60,53 +55,52 @@ async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
   }
 }
 
-/* --------------------------- API Methods -------------------------- */
+/**
+ * n8n v6 Format Response envuelve SIEMPRE en { success, data, count, timestamp }.
+ * Si la respuesta tiene esa forma, extrae .data; si no, devuelve tal cual.
+ */
+function unwrapN8n<T>(raw: any): T {
+  if (raw && typeof raw === "object" && "success" in raw && "data" in raw) {
+    return raw.data as T;
+  }
+  return raw as T;
+}
+
+/**
+ * Garantiza que el resultado sea siempre un array (Property[]).
+ * n8n devuelve objeto cuando hay exactamente 1 resultado.
+ */
+function toArray<T>(val: any): T[] {
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === "object") return [val];
+  return [];
+}
+
+// ─── API Methods ──────────────────────────────────────────────────────────────
 
 export async function searchProperties(filters: SearchFilters): Promise<SearchResult> {
-  const items = await n8nRequest<Property[]>("ai_search", { prompt: filters.q || "todas" });
+  const res = await n8nRequest<any>("ai_search", { prompt: filters.q || "todas" });
+  const items = toArray<Property>(unwrapN8n(res));
   return {
     items,
     total: items.length,
     query: filters.q ?? "",
-    aiSummary: `Encontré ${items.length} propiedades reales en la base de datos.`
+    aiSummary: `Encontré ${items.length} propiedades en la base de datos.`,
   };
 }
 
 export async function getProperty(id: string): Promise<Property | null> {
-  const result = await n8nRequest<Property | null>("get_property", { id });
-  return result ?? null;
+  const res = await n8nRequest<any>("get_property", { id });
+  const data = unwrapN8n<any>(res);
+  return toArray<Property>(data)[0] ?? null;
 }
 
 export async function publishProperty(input: any): Promise<Property> {
-  const result = await n8nRequest<{ id: number }>("publish", input);
-  return { ...input, id: String(result.id) };
+  const res = await n8nRequest<any>("publish", input);
+  const data = unwrapN8n<any>(res);
+  return { ...input, id: String(data?.id ?? data) };
 }
 
-export async function publishBulkProperties(properties: any[], userId?: string): Promise<{ count: number }> {
-  return n8nRequest<{ count: number }>("publish_bulk", { properties, userId });
-}
-
-export async function getDashboardProperties(userId?: string): Promise<Property[]> {
-  return n8nRequest<Property[]>("ai_search", { prompt: "mis propiedades", userId });
-}
-
-export async function getStats(): Promise<DashboardStats> {
-  return n8nRequest<DashboardStats>("get_stats", {});
-}
-
-export async function aiChat(message: string) {
-  return { reply: "Conectado al asistente web. ¿En qué puedo ayudarte?" };
-}
-
-/* --------------------------- Mock Fallbacks ----------------------- */
-async function mockFallback<T>(op: string, _payload: any): Promise<T> {
-  if (op === "get_stats") {
-    return {
-      totalProperties: 0,
-      publishedProperties: 0,
-      totalLeads: 0,
-      pendingMessages: 0,
-    } as unknown as T;
-  }
-  return [] as unknown as T;
-}
+export async function publishBulkProperties(
+  properties: any[],
+  userI

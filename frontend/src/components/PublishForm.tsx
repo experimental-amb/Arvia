@@ -11,42 +11,30 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { publishProperty } from "@/services/api";
-import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
-import { REGIONES_CHILE, getComunasByRegion, REGION_NAMES } from "@/lib/chile-regiones";
+
+const REGIONS = ["Metropolitana", "Valparaíso", "Coquimbo", "Biobío", "Los Lagos"];
 
 export function PublishForm() {
-  const { user } = useAuth();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-
-  const REGION_DEFAULT = REGIONES_CHILE.find((r) => r.codigo === "RM")!.nombre;
 
   const [form, setForm] = useState({
     title: "",
     description: "",
     price: "",
-    region: REGION_DEFAULT,
+    region: "Metropolitana",
     comuna: "",
     address: "",
     bedrooms: "2",
     bathrooms: "1",
     sqm: "",
   });
-
-  // Comunas disponibles según la región seleccionada
-  const comunasDisponibles = getComunasByRegion(form.region);
-
-  const handleRegionChange = (nuevaRegion: string) => {
-    setForm((prev) => ({ ...prev, region: nuevaRegion, comuna: "" }));
-  };
   const [images, setImages] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
@@ -87,7 +75,6 @@ export function PublishForm() {
         bathrooms: Number(form.bathrooms),
         sqm: Number(form.sqm),
         images,
-        userId: user?.uid,
       });
       setDone(true);
       setTimeout(() => router.push(`/property/${created.id}`), 1200);
@@ -192,75 +179,29 @@ export function PublishForm() {
           </Header>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            {/* Selector Región */}
             <div className="space-y-2">
-              <Label htmlFor="region">Región</Label>
-              <Select value={form.region} onValueChange={handleRegionChange}>
-                <SelectTrigger id="region">
-                  <SelectValue placeholder="Selecciona una región" />
+              <Label>Región</Label>
+              <Select value={form.region} onValueChange={(v) => setField("region", v)}>
+                <SelectTrigger>
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="max-h-72 overflow-y-auto">
-                  <SelectGroup>
-                    <SelectLabel>Zona Norte</SelectLabel>
-                    {REGIONES_CHILE.slice(0, 4).map((r) => (
-                      <SelectItem key={r.codigo} value={r.nombre}>
-                        {r.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                  <SelectGroup>
-                    <SelectLabel>Zona Centro</SelectLabel>
-                    {REGIONES_CHILE.slice(4, 7).map((r) => (
-                      <SelectItem key={r.codigo} value={r.nombre}>
-                        {r.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                  <SelectGroup>
-                    <SelectLabel>Zona Sur</SelectLabel>
-                    {REGIONES_CHILE.slice(7, 13).map((r) => (
-                      <SelectItem key={r.codigo} value={r.nombre}>
-                        {r.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                  <SelectGroup>
-                    <SelectLabel>Zona Austral</SelectLabel>
-                    {REGIONES_CHILE.slice(13).map((r) => (
-                      <SelectItem key={r.codigo} value={r.nombre}>
-                        {r.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Selector Comuna — filtrado por región seleccionada */}
-            <div className="space-y-2">
-              <Label htmlFor="comuna">Comuna</Label>
-              <Select
-                value={form.comuna}
-                onValueChange={(v) => setField("comuna", v)}
-                disabled={comunasDisponibles.length === 0}
-              >
-                <SelectTrigger id="comuna">
-                  <SelectValue
-                    placeholder={
-                      comunasDisponibles.length === 0
-                        ? "Primero elige una región"
-                        : "Selecciona una comuna"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent className="max-h-72 overflow-y-auto">
-                  {comunasDisponibles.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
+                <SelectContent>
+                  {REGIONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Comuna</Label>
+              <Input
+                placeholder="Ej: Las Condes"
+                value={form.comuna}
+                onChange={(e) => setField("comuna", e.target.value)}
+                required
+              />
             </div>
           </div>
 

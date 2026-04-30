@@ -9,16 +9,23 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import type { SearchFilters } from "@/types/property";
-import { REGIONES_CHILE, getComunasByRegion } from "@/lib/chile-regiones";
+
+const COMUNAS = [
+  "Viña del Mar",
+  "La Serena",
+  "Providencia",
+  "Las Condes",
+  "Algarrobo",
+  "Ñuñoa",
+  "Vitacura",
+];
 
 interface FilterSidebarProps {
   value: SearchFilters;
@@ -28,27 +35,12 @@ interface FilterSidebarProps {
 
 export function FilterSidebar({ value, onChange, onApply }: FilterSidebarProps) {
   const [localMaxPrice, setLocalMaxPrice] = useState(value.maxPrice ?? 800_000_000);
-  // Región seleccionada en el sidebar (independiente del SearchFilters para cascada)
-  const [selectedRegion, setSelectedRegion] = useState<string>("");
 
   useEffect(() => {
     setLocalMaxPrice(value.maxPrice ?? 800_000_000);
   }, [value.maxPrice]);
 
-  const comunasDisponibles = selectedRegion ? getComunasByRegion(selectedRegion) : [];
-
-  const handleRegionChange = (region: string) => {
-    setSelectedRegion(region);
-    // Al cambiar región, reseteamos la comuna seleccionada
-    onChange({ ...value, region: region || undefined, comuna: undefined });
-  };
-
-  const handleComunaChange = (comuna: string) => {
-    onChange({ ...value, comuna: comuna || undefined });
-  };
-
   const reset = () => {
-    setSelectedRegion("");
     onChange({ q: value.q });
     setLocalMaxPrice(800_000_000);
   };
@@ -76,67 +68,17 @@ export function FilterSidebar({ value, onChange, onApply }: FilterSidebarProps) 
 
       <Separator />
 
-      {/* Selector Región */}
-      <div className="space-y-2">
-        <Label>Región</Label>
-        <Select value={selectedRegion} onValueChange={handleRegionChange}>
-          <SelectTrigger id="filter-region">
-            <SelectValue placeholder="Todas las regiones" />
-          </SelectTrigger>
-          <SelectContent className="max-h-72 overflow-y-auto">
-            <SelectItem value="">Todas las regiones</SelectItem>
-            <SelectGroup>
-              <SelectLabel>Zona Norte</SelectLabel>
-              {REGIONES_CHILE.slice(0, 4).map((r) => (
-                <SelectItem key={r.codigo} value={r.nombre}>
-                  {r.nombre}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            <SelectGroup>
-              <SelectLabel>Zona Centro</SelectLabel>
-              {REGIONES_CHILE.slice(4, 7).map((r) => (
-                <SelectItem key={r.codigo} value={r.nombre}>
-                  {r.nombre}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            <SelectGroup>
-              <SelectLabel>Zona Sur</SelectLabel>
-              {REGIONES_CHILE.slice(7, 13).map((r) => (
-                <SelectItem key={r.codigo} value={r.nombre}>
-                  {r.nombre}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            <SelectGroup>
-              <SelectLabel>Zona Austral</SelectLabel>
-              {REGIONES_CHILE.slice(13).map((r) => (
-                <SelectItem key={r.codigo} value={r.nombre}>
-                  {r.nombre}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Selector Comuna — filtrado según región */}
       <div className="space-y-2">
         <Label>Comuna</Label>
         <Select
           value={value.comuna ?? ""}
-          onValueChange={handleComunaChange}
-          disabled={!selectedRegion}
+          onValueChange={(v) => onChange({ ...value, comuna: v || undefined })}
         >
-          <SelectTrigger id="filter-comuna">
-            <SelectValue
-              placeholder={selectedRegion ? "Todas las comunas" : "Primero elige una región"}
-            />
+          <SelectTrigger>
+            <SelectValue placeholder="Todas" />
           </SelectTrigger>
-          <SelectContent className="max-h-72 overflow-y-auto">
-            <SelectItem value="">Todas las comunas</SelectItem>
-            {comunasDisponibles.map((c) => (
+          <SelectContent>
+            {COMUNAS.map((c) => (
               <SelectItem key={c} value={c}>
                 {c}
               </SelectItem>
