@@ -24,6 +24,49 @@ export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
   const [message, setMessage] = useState("");
   const [open, setOpen] = useState(false);
 
+  // T18: Validación de esquema — columnas requeridas y tipos de datos
+  const REQUIRED_COLUMNS = ["title", "comuna", "price"] as const;
+  const NUMERIC_COLUMNS  = ["price", "bedrooms", "bathrooms", "sqm"] as const;
+
+  function validateRows(rows: any[]): void {
+    if (rows.length === 0) throw new Error("El archivo está vacío");
+    if (rows.length > 1000) throw new Error(`Demasiadas filas: ${rows.length}. Máximo permitido: 1 000`);
+
+    const firstRow = rows[0] as Record<string, unknown>;
+    const presentCols = Object.keys(firstRow).map((k) => k.toLowerCase().trim());
+
+    const missing = REQUIRED_COLUMNS.filter(
+      (col) => !presentCols.includes(col)
+    );
+    if (missing.length > 0) {
+      throw new Error(
+        `Columnas requeridas faltantes: ${missing.join(", ")}.\n` +
+        `Descarga la plantilla base para ver el formato correcto.`
+      );
+    }
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] as Record<string, unknown>;
+      for (const col of NUMERIC_COLUMNS) {
+        const val = row[col];
+        if (val !== undefined && val !== "" && isNaN(Number(val))) {
+          throw new Error(
+            `Fila ${i + 2}: la columna "${col}" debe ser numérica (valor recibido: "${val}")`
+          );
+        }
+      }
+      if (!row["title"] || String(row["title"]).trim().length < 3) {
+        throw new Error(`Fila ${i + 2}: "title" debe tener al menos 3 caracteres`);
+      }
+      if (!row["comuna"] || String(row["comuna"]).trim() === "") {
+        throw new Error(`Fila ${i + 2}: "comuna" no puede estar vacía`);
+      }
+      if (Number(row["price"]) <= 0) {
+        throw new Error(`Fila ${i + 2}: "price" debe ser mayor que 0`);
+      }
+    }
+  }
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -41,9 +84,8 @@ export function BulkImportModal({ onSuccess }: BulkImportModalProps) {
           const ws = wb.Sheets[wsname];
           const data = XLSX.utils.sheet_to_json(ws);
 
-          if (data.length === 0) {
-            throw new Error("El archivo está vacío");
-          }
+          // T18: Validar esquema antes de enviar al backend
+          validateRows(data);
 
           // Enviar al backend
           await publishBulkProperties(data);

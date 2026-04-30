@@ -46,6 +46,9 @@ services:
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD}
 
+      # 🔑 API KEY para el webhook de Web API (definir en .env)
+      WEB_API_KEY: ${WEB_API_KEY}
+
       # PERFORMANCE
       EXECUTIONS_PROCESS: main
       N8N_RUNNERS_ENABLED: "true"
@@ -54,9 +57,11 @@ services:
       N8N_HOST: 0.0.0.0
       N8N_PORT: 5678
       N8N_PROTOCOL: https
-      
-      # 🌐 CORS (Permite que Vercel se comunique con n8n)
-      N8N_CORS_ALLOWED_ORIGINS: "*"
+
+      # 🌐 CORS — Solo el dominio de Vercel autorizado (NO wildcard)
+      # Para desarrollo local añadir: http://localhost:3000
+      N8N_CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:-https://arvia-nu.vercel.app}"
+      N8N_CORS_ALLOWED_HEADERS: "Origin, Content-Type, Accept, Authorization, X-Api-Key"
 
     volumes:
       - n8n_data:/home/node/.n8n

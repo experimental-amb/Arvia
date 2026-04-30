@@ -1,0 +1,895 @@
+{
+  "name": "InitCore Telegram AI Agent (Full)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "17d63fd6-2078-47cc-8098-271b0bb0c8c5",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        5936,
+        4288
+      ],
+      "webhookId": "36b97044-a3ef-4c52-be4a-aa16158ae528",
+      "credentials": {
+        "telegramApi": {
+          "id": "2O38rTGAOwGgAcyt",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const msg = $input.first().json;\nreturn [{ json: {\n  user_id: String(msg.message.from.id),\n  chat_id: String(msg.message.chat.id),\n  user_input: (msg.message.text || '').replace(/'/g, \"''\")\n} }];"
+      },
+      "id": "4b9120c8-b40b-4793-929f-0590024c0da0",
+      "name": "Extract Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        6144,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO messages (user_id, text) VALUES ('{{ $json.user_id }}', '{{ $json.user_input }}');",
+        "options": {}
+      },
+      "id": "e61c1f6d-58a7-4617-b297-ed03b2535cff",
+      "name": "Save User Message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        6336,
+        4288
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT text, response FROM messages WHERE user_id = '{{ $('Extract Data').item.json.user_id }}' ORDER BY created_at DESC LIMIT 5;",
+        "options": {}
+      },
+      "id": "cb0d2128-fef0-43bb-abf8-c06854e73afb",
+      "name": "Get Memory",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        6544,
+        4288
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const rows = $input.all();\nconst history = rows.filter(r => r.json && r.json.text).map(r => `Usuario: ${r.json.text}${r.json.response ? '\\nAsistente: ' + r.json.response : ''}`).join('\\n');\nreturn [{ json: {\n  history: history || '(sin historial)',\n  user_id: $('Extract Data').item.json.user_id,\n  chat_id: $('Extract Data').item.json.chat_id,\n  user_input: $('Extract Data').item.json.user_input\n} }];"
+      },
+      "id": "0e449edf-c3b6-4d48-bcaa-623da284f7e5",
+      "name": "Prepare Context",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        6736,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3', prompt: 'Clasifica la intención del siguiente mensaje en UNA sola palabra entre estas opciones: saludo, precio, soporte, consulta_propiedad, lead_propiedad, otro.\\n\\nUsa consulta_propiedad si menciona buscar casa, departamento, arriendo o comunas.\\nUsa lead_propiedad si dice: me interesa, quiero ver, mas info, visita, contacto, interesado.\\n\\nMensaje: ' + $json.user_input + '\\n\\nResponde solo con la palabra.', stream: false }) }}",
+        "options": {}
+      },
+      "id": "0c993e5c-731f-44bb-ad1a-42e2110faa26",
+      "name": "Classify Intent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        6944,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const raw = ($input.first().json.response || '').toLowerCase().trim();\nconst ctx = $('Prepare Context').item.json;\nconst txt = ctx.user_input.toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');\n\nlet intent = 'otro';\nif (raw.includes('lead_propiedad') || raw.includes('lead')) intent = 'lead_propiedad';\nelse if (raw.includes('consulta_propiedad') || raw.includes('propiedad')) intent = 'consulta_propiedad';\nelse if (raw.includes('saludo')) intent = 'saludo';\nelse if (raw.includes('precio')) intent = 'precio';\nelse if (raw.includes('soporte')) intent = 'soporte';\n\nif (intent === 'otro' && txt.match(/me interesa|quiero ver|mas info|visita|contacto|interesado/)) intent = 'lead_propiedad';\nif (intent === 'otro' && txt.match(/casa|departamento|depto|arriendo|propiedad|vina|serena|santiago|valparaiso|nunoa|providencia|maipu/)) intent = 'consulta_propiedad';\n\nreturn [{ json: { intent, user_id: ctx.user_id, chat_id: ctx.chat_id, user_input: ctx.user_input, history: ctx.history } }];"
+      },
+      "id": "455928cb-5c2a-4837-8eca-6556b36685c5",
+      "name": "Parse Intent",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        7136,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM leads WHERE user_id = '{{ $json.user_id }}' AND (nombre IS NULL OR telefono IS NULL) ORDER BY created_at DESC LIMIT 1;",
+        "options": {}
+      },
+      "id": "3069c543-433a-416e-a46f-e0a42391d294",
+      "name": "Check Lead State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        7344,
+        4288
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const rows = $input.all().map(i => i.json);\nconst existingLead = rows.find(r => r && r.id) || null;\nconst ctx = $('Parse Intent').item.json;\nlet intent = ctx.intent;\nlet lead_state = 'none';\n\nif (existingLead) {\n  if (!existingLead.nombre) {\n    lead_state = 'needs_name';\n    if (intent === 'otro') intent = 'lead_propiedad';\n  } else if (!existingLead.telefono) {\n    lead_state = 'needs_phone';\n    if (intent === 'otro') intent = 'lead_propiedad';\n  } else {\n    lead_state = 'complete';\n  }\n} else if (intent === 'lead_propiedad') {\n  lead_state = 'new';\n}\n\nreturn [{ json: { intent, lead_state, existing_lead: existingLead, user_id: ctx.user_id, chat_id: ctx.chat_id, user_input: ctx.user_input, history: ctx.history } }];"
+      },
+      "id": "185117c0-d681-43ec-ad5c-6c8e682e2e3c",
+      "name": "Lead Resolver",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        7536,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intent }}",
+              "value2": "lead_propiedad"
+            }
+          ]
+        }
+      },
+      "id": "7aba08bd-804e-4c6e-b671-ec7467f8fde2",
+      "name": "IF Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        7744,
+        4288
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const ctx = $input.first().json;\nconst { lead_state, existing_lead, user_id, chat_id, user_input } = ctx;\nconst currentMsg = user_input.replace(/'/g, \"''\");\nlet reply, lead_sql;\n\nif (lead_state === 'new') {\n  reply = 'Perfecto 👌 ¿Me indicas tu nombre completo?';\n  lead_sql = `INSERT INTO leads (user_id, interes) VALUES ('${user_id}', 'Propiedad consultada')`;\n} else if (lead_state === 'needs_name') {\n  reply = '¿Tu número de contacto? 📱';\n  lead_sql = `UPDATE leads SET nombre = '${currentMsg}' WHERE id = ${existing_lead.id}`;\n} else if (lead_state === 'needs_phone') {\n  const nombre = existing_lead.nombre || 'Usuario';\n  reply = `¡Gracias ${nombre}! Te contactaremos pronto 📞\\\\nNuestro equipo se pondrá en contacto a la brevedad.`;\n  lead_sql = `UPDATE leads SET telefono = '${currentMsg}' WHERE id = ${existing_lead.id}`;\n} else {\n  reply = '¡Ya tenemos tus datos! Te contactaremos muy pronto 📞';\n  lead_sql = 'SELECT 1';\n}\n\nreturn [{ json: { reply, reply_db: reply.replace(/'/g, \"''\"), user_id, chat_id, lead_sql } }];"
+      },
+      "id": "8585edea-e13b-4e1d-8e96-8b4f03dca860",
+      "name": "Lead Handler",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        7936,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.lead_sql }}",
+        "options": {}
+      },
+      "id": "8e0cd467-6062-4e6a-bc37-80fcd08a89a4",
+      "name": "Save Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        8144,
+        4096
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: {\n  reply: $('Lead Handler').item.json.reply,\n  reply_db: $('Lead Handler').item.json.reply_db,\n  user_id: $('Lead Handler').item.json.user_id,\n  chat_id: $('Lead Handler').item.json.chat_id\n} }];"
+      },
+      "id": "684025d2-e7b8-4e6e-9a7f-b66cdac5f142",
+      "name": "Lead Reply",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        8336,
+        4096
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intent }}",
+              "value2": "consulta_propiedad"
+            }
+          ]
+        }
+      },
+      "id": "5ccdba04-5166-40d8-b180-2eabe45bc802",
+      "name": "IF Propiedad",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        7936,
+        4384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.intent }}",
+              "operation": "notEqual",
+              "value2": "otro"
+            }
+          ]
+        }
+      },
+      "id": "40edd1bb-2113-4518-ae04-ba5287482acd",
+      "name": "IF Intent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        7936,
+        4560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM user_state WHERE user_id = '{{ $json.user_id }}' LIMIT 1;",
+        "options": {}
+      },
+      "id": "75123b43-ffcf-4df9-82a9-f15c2320614b",
+      "name": "Get User State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        8144,
+        4384
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const ctx = $('Lead Resolver').item.json;\nconst state = $input.first().json;\nconst msg = ctx.user_input;\nlet next_step = null;\nlet reply = null;\nlet reply_markup = null;\nlet sql = null;\n\nif (!state || !state.step) {\n  next_step = 'comuna';\n  reply = '¡Excelente! Iniciemos la búsqueda 🏡\\\\n\\\\n¿En qué *comuna* o sector buscas la propiedad?';\n  sql = `INSERT INTO user_state (user_id, step) VALUES ('${ctx.user_id}', 'comuna') ON CONFLICT (user_id) DO UPDATE SET step = 'comuna'`;\n} else if (state.step === 'comuna') {\n  next_step = 'dormitorios';\n  reply = `Perfecto, buscaremos en ${msg}. ¿Cuántos *dormitorios* necesitas?`;\n  reply_markup = { keyboard: [[{text: '1'}, {text: '2'}], [{text: '3'}, {text: '4+'}], [{text: 'Cualquiera'}]], one_time_keyboard: true, resize_keyboard: true };\n  sql = `UPDATE user_state SET step = 'dormitorios', comuna = '${msg}' WHERE user_id = '${ctx.user_id}'`;\n} else if (state.step === 'dormitorios') {\n  next_step = 'banos';\n  reply = 'Entendido. ¿Y cuántos *baños* buscas?';\n  reply_markup = { keyboard: [[{text: '1'}, {text: '2'}], [{text: '3+'}], [{text: 'Cualquiera'}]], one_time_keyboard: true, resize_keyboard: true };\n  sql = `UPDATE user_state SET step = 'banos', dormitorios = '${msg}' WHERE user_id = '${ctx.user_id}'`;\n} else if (state.step === 'banos') {\n  next_step = 'done';\n  reply = '¡Todo listo! Estoy buscando las mejores opciones para ti... ⏳';\n  sql = `UPDATE user_state SET step = 'done', banos = '${msg}' WHERE user_id = '${ctx.user_id}'`;\n}\n\nreturn [{ json: { next_step, reply, reply_markup, sql, user_id: ctx.user_id, chat_id: ctx.chat_id, state } }];"
+      },
+      "id": "de3bdd2c-d2f2-48bd-b8dc-2c6cc7541963",
+      "name": "Wizard Logic",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        8336,
+        4384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.next_step }}",
+              "value2": "done"
+            }
+          ]
+        }
+      },
+      "id": "293625b4-75de-4a79-b628-777ee28419ad",
+      "name": "IF Wizard Done",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        8544,
+        4384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "id": "7d3cf136-8ac4-4725-88b7-8490c3f66bbf",
+      "name": "Update User State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        8544,
+        4528
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const ctx = $('Wizard Logic').item.json;\nreturn [{ json: { reply: ctx.reply, reply_markup: ctx.reply_markup, reply_db: ctx.reply.replace(/'/g, \"''\"), user_id: ctx.user_id, chat_id: ctx.chat_id } }];"
+      },
+      "id": "7846f09a-a9d1-437c-9adf-47be84a30c92",
+      "name": "Wizard Reply",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        8736,
+        4528
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const s = $('Wizard Logic').item.json.state;\nconst msg = $('Wizard Logic').item.json.reply; // Using current input which was the last step answer\nconst params = {\n  comuna: s.comuna,\n  dormitorios: parseInt(s.dormitorios) || 0,\n  banos: parseInt($('Lead Resolver').item.json.user_input) || 0,\n  sqm: 0\n};\nreturn [{ json: { params, user_id: s.user_id } }];"
+      },
+      "id": "78e193bd-86e1-422e-b1a7-a39a6a1a92ea",
+      "name": "Prepare Wizard Query",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        8736,
+        4240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM properties WHERE comuna ILIKE '%{{ $json.params.comuna }}%' AND (bedrooms >= {{ $json.params.dormitorios || 0 }} OR bedrooms IS NULL) AND (bathrooms >= {{ $json.params.banos || 0 }} OR bathrooms IS NULL) LIMIT 3;",
+        "options": {}
+      },
+      "id": "15b9b4ca-4287-4f84-a3ba-7743b693f416",
+      "name": "Query Properties",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        8944,
+        4240
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM user_state WHERE user_id = '{{ $('Wizard Logic').item.json.user_id }}';",
+        "options": {}
+      },
+      "id": "0fb89101-6a63-437a-a624-715b6fcb9699",
+      "name": "Delete User State",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        9136,
+        4240
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const props = $input.all().map(i => i.json).filter(p => p && p.id);\nconst ctx = $('Wizard Logic').item.json;\nlet reply;\nif (props.length === 0) {\n  reply = 'No encontré propiedades con esas características 😕\\\\n¿Te gustaría ajustar los filtros (menos dormitorios o cambiar la comuna)?';\n} else {\n  reply = '🏡 *Propiedades encontradas:*\\\\n\\\\n';\n  props.forEach((p, i) => {\n    const precio = p.price ? '$' + Number(p.price).toLocaleString('es-CL') : 'Consultar';\n    reply += `${i+1}.\\\\n📍 *${p.title || 'Propiedad'}*\\\\n📍 Comuna: ${p.comuna || '-'}\\\\n💰 Precio: ${precio}\\\\n🛏 Dorm: ${p.bedrooms || p.dormitorios || '-'}\\\\n🛁 Baños: ${p.bathrooms || p.banos || '-'}\\\\n📐 M2: ${p.sqm || '-'}\\\\n\\\\n`;\n  });\n  reply += '¿Te interesa alguna para agendar visita? 👇';\n}\nreturn [{ json: { reply, reply_db: reply.replace(/'/g, \"''\"), user_id: ctx.user_id, chat_id: ctx.chat_id } }];"
+      },
+      "id": "0bd03b40-c3fc-4319-ae1c-5d0a7c83f6a5",
+      "name": "Format Property",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        9344,
+        4240
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const ctx = $input.first().json;\nconst responses = { saludo: '¡Hola! 👋 ¿En qué puedo ayudarte hoy?', precio: '💰 Puedo ayudarte con precios. ¿Qué buscas?', soporte: '🛠 Cuéntame el problema y te ayudaré paso a paso.' };\nconst r = responses[ctx.intent] || '¿En qué puedo ayudarte?';\nreturn [{ json: { reply: r, reply_db: r.replace(/'/g, \"''\"), user_id: ctx.user_id, chat_id: ctx.chat_id } }];"
+      },
+      "id": "09f983ad-8065-4f2b-8eeb-82a45424ccce",
+      "name": "Static Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        8144,
+        4480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'llama3', prompt: 'Eres un asistente útil y amable. Responde de forma concisa en español.\\\\n\\\\nHistorial:\\\\n' + $json.history + '\\\\n\\\\nUsuario: ' + $json.user_input, stream: false }) }}",
+        "options": {}
+      },
+      "id": "98adcf88-3fa0-4b2c-b648-90b1282f77e5",
+      "name": "AI Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        8144,
+        4624
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const rawReply = ($input.first().json.response || 'No pude generar una respuesta.').trim();\nconst ctx = $('Lead Resolver').item.json;\nreturn [{ json: { reply: rawReply, reply_db: rawReply.replace(/'/g, \"''\"), user_id: ctx.user_id, chat_id: ctx.chat_id } }];"
+      },
+      "id": "d8ab8ba7-cac9-4c9c-af48-21a0ebde5569",
+      "name": "Format AI",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        8336,
+        4624
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE messages SET response = '{{ $json.reply_db }}' WHERE id = (SELECT id FROM messages WHERE user_id = '{{ $json.user_id }}' AND response IS NULL ORDER BY created_at DESC LIMIT 1);",
+        "options": {}
+      },
+      "id": "e35e03b3-a2ec-461d-b56b-e329c6aa586b",
+      "name": "Save AI",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        9648,
+        4384
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const chat_id = $('Extract Data').item.json.chat_id;\nlet reply = 'Procesado.';\nlet reply_markup = null;\nconst sources = ['Lead Reply', 'Format Property', 'Static Response', 'Format AI', 'Wizard Reply'];\nfor (const name of sources) {\n  try {\n    if ($(`${name}`).isExecuted) {\n      const data = $(`${name}`).item.json;\n      if (data.reply) { \n        reply = data.reply; \n        if (data.reply_markup) reply_markup = data.reply_markup;\n        break; \n      }\n    }\n  } catch(e) {}\n}\nreturn [{ json: { chat_id, reply, reply_markup } }];"
+      },
+      "id": "1c2e5860-0132-4827-a4a5-312878da6cab",
+      "name": "Prepare Send",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        9840,
+        4384
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "id": "5e6b255e-aeba-46a7-a5f1-9c3b12f7f4bb",
+      "name": "Send Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        10048,
+        4384
+      ],
+      "webhookId": "aa0f52cc-8fa2-4783-a936-8dd6b334292e",
+      "credentials": {
+        "telegramApi": {
+          "id": "2O38rTGAOwGgAcyt",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Data": {
+      "main": [
+        [
+          {
+            "node": "Save User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Message": {
+      "main": [
+        [
+          {
+            "node": "Get Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Memory": {
+      "main": [
+        [
+          {
+            "node": "Prepare Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Context": {
+      "main": [
+        [
+          {
+            "node": "Classify Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Intent": {
+      "main": [
+        [
+          {
+            "node": "Parse Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Intent": {
+      "main": [
+        [
+          {
+            "node": "Check Lead State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Lead State": {
+      "main": [
+        [
+          {
+            "node": "Lead Resolver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Resolver": {
+      "main": [
+        [
+          {
+            "node": "IF Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Handler",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Propiedad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Handler": {
+      "main": [
+        [
+          {
+            "node": "Save Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Reply": {
+      "main": [
+        [
+          {
+            "node": "Save AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Propiedad": {
+      "main": [
+        [
+          {
+            "node": "Get User State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "IF Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Intent": {
+      "main": [
+        [
+          {
+            "node": "Static Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User State": {
+      "main": [
+        [
+          {
+            "node": "Wizard Logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wizard Logic": {
+      "main": [
+        [
+          {
+            "node": "IF Wizard Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Wizard Done": {
+      "main": [
+        [
+          {
+            "node": "Prepare Wizard Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update User State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update User State": {
+      "main": [
+        [
+          {
+            "node": "Wizard Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wizard Reply": {
+      "main": [
+        [
+          {
+            "node": "Save AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Wizard Query": {
+      "main": [
+        [
+          {
+            "node": "Query Properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Properties": {
+      "main": [
+        [
+          {
+            "node": "Delete User State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete User State": {
+      "main": [
+        [
+          {
+            "node": "Format Property",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Property": {
+      "main": [
+        [
+          {
+            "node": "Save AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Static Response": {
+      "main": [
+        [
+          {
+            "node": "Save AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Response": {
+      "main": [
+        [
+          {
+            "node": "Format AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format AI": {
+      "main": [
+        [
+          {
+            "node": "Save AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save AI": {
+      "main": [
+        [
+          {
+            "node": "Prepare Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Send": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b12bdb0b-526d-4ebc-8dc9-919cf5139267",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5cb12cb82bb26aa076317e3def0370141f0698a4a24ef9d67c35b55f9aab2d67"
+  },
+  "id": "sY1qh3rWbd5ik94V",
+  "tags": []
+}

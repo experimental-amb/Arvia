@@ -17,7 +17,7 @@ build/
 frontend/.next/
 frontend/out/
 
-# Environment / Secrets (CRITICAL)
+# Environment / Secrets (CRITICAL — NUNCA comprometer al repo)
 .env
 .env.local
 .env.development.local
@@ -26,6 +26,14 @@ frontend/out/
 env.json
 credentials.json
 *.pem
+*.key
+*.p12
+*.pfx
+*.crt
+secrets/
+credentials/
+frontend/.env
+propiedades_reales_chile.csv
 
 # n8n / Docker
 .n8n/
@@ -43,3 +51,19 @@ __pycache__/
 *$py.class
 venv/
 .venv/
+
+# Scripts temporales de generación/fix de workflows
+fix_wf.py
+fix_init.py
+generate_web_wf.py
+merge_wf.py
+final_cleanup_wf.py
+
+# Versiones intermedias del workflow web API (mantener solo v4)
+web_api_workflow.json
+web_api_workflow_final.json
+web_api_workflow_v2.json
+web_api_workflow_v3.json
+
+# Datos reales / sensibles (solo .csv de datos reales ya cubiertos arriba)
+# propiedades_muestra_chile.csv se mantiene trackeada (datos de muestra, no sensibles)

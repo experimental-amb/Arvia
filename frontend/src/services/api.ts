@@ -6,6 +6,7 @@ import type { Property, SearchFilters, SearchResult } from "@/types/property";
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+const API_KEY  = process.env.NEXT_PUBLIC_API_KEY ?? "";
 const USE_MOCK = !API_BASE || process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
 export interface ApiError extends Error {
@@ -13,23 +14,43 @@ export interface ApiError extends Error {
   body?: unknown;
 }
 
+// T19: Tipado de las estadísticas del dashboard
+export interface DashboardStats {
+  totalProperties: number;
+  publishedProperties: number;
+  totalLeads: number;
+  pendingMessages: number;
+}
+
 async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
   if (USE_MOCK) {
-    console.warn("Using Mock Data - Config NEXT_PUBLIC_API_BASE_URL to use real API");
+    console.warn("Using Mock Data - Configura NEXT_PUBLIC_API_BASE_URL para usar la API real");
     return mockFallback<T>(operation, payload);
+  }
+
+  // T16: Eliminado header ngrok "ngrok-skip-browser-warning"
+  // T16: Añadida autenticación real vía x-api-key
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (API_KEY) {
+    headers["x-api-key"] = API_KEY;
   }
 
   const res = await fetch(API_BASE, {
     method: "POST",
-    headers: { 
-      "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "69420"
-    },
+    headers,
     body: JSON.stringify({ operation, payload }),
   });
 
   if (!res.ok) {
-    throw new Error(`API Error: ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    const err: ApiError = new Error(
+      (body as any)?.error ?? `API Error: ${res.status}`
+    );
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
 
   return res.json() as Promise<T>;
@@ -47,9 +68,10 @@ export async function searchProperties(filters: SearchFilters): Promise<SearchRe
   };
 }
 
+// T17: Corregido — usa operación dedicada get_property en lugar de ai_search con prompt hack
 export async function getProperty(id: string): Promise<Property | null> {
-  const items = await n8nRequest<Property[]>("ai_search", { prompt: `id:${id}` });
-  return items[0] || null;
+  const result = await n8nRequest<Property | null>("get_property", { id });
+  return result ?? null;
 }
 
 export async function publishProperty(input: any): Promise<Property> {
@@ -65,12 +87,24 @@ export async function getDashboardProperties(userId?: string): Promise<Property[
   return n8nRequest<Property[]>("ai_search", { prompt: "mis propiedades" });
 }
 
+// T19: Nueva función — obtiene métricas reales del backend
+export async function getStats(): Promise<DashboardStats> {
+  return n8nRequest<DashboardStats>("get_stats", {});
+}
+
 export async function aiChat(message: string) {
   return { reply: "Conectado al asistente web. ¿En qué puedo ayudarte?" };
 }
 
 /* --------------------------- Mock Fallbacks ----------------------- */
-async function mockFallback<T>(op: string, payload: any): Promise<T> {
-  // Logic to maintain basic functionality if n8n is offline
-  return [] as any;
+async function mockFallback<T>(op: string, _payload: any): Promise<T> {
+  if (op === "get_stats") {
+    return {
+      totalProperties: 0,
+      publishedProperties: 0,
+      totalLeads: 0,
+      pendingMessages: 0,
+    } as unknown as T;
+  }
+  return [] as unknown as T;
 }

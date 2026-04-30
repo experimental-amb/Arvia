@@ -7,21 +7,16 @@ import { Building2, Eye, MessageCircle, PlusCircle, TrendingUp } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { DashboardTable } from "@/components/DashboardTable";
 import { useAuth } from "@/lib/auth-context";
-import { getDashboardProperties } from "@/services/api";
+import { getDashboardProperties, getStats, type DashboardStats } from "@/services/api";
 import type { Property } from "@/types/property";
 import { BulkImportModal } from "@/components/BulkImportModal";
-
-const METRICS = [
-  { icon: Building2, label: "Propiedades activas", value: "5", delta: "+2 este mes" },
-  { icon: Eye, label: "Visualizaciones", value: "1 284", delta: "+18.2% vs sem. pasada" },
-  { icon: MessageCircle, label: "Leads capturados", value: "27", delta: "+6 hoy" },
-  { icon: TrendingUp, label: "Tasa conversión", value: "4.3%", delta: "estable" },
-];
 
 export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]         = useState(true);
+  // T19: Estado para métricas reales del backend
+  const [stats, setStats] = useState<DashboardStats | null>(null);
 
   const fetchProperties = async () => {
     setLoading(true);
@@ -33,9 +28,20 @@ export default function DashboardPage() {
     }
   };
 
+  // T19: Cargar métricas reales al montar el componente
+  const fetchStats = async () => {
+    try {
+      const data = await getStats();
+      setStats(data);
+    } catch {
+      // Silencioso: el dashboard sigue funcionando sin métricas
+    }
+  };
+
   useEffect(() => {
     if (authLoading) return;
     fetchProperties();
+    fetchStats();
   }, [authLoading, user?.uid]);
 
   return (
@@ -86,9 +92,34 @@ export default function DashboardPage() {
         </motion.div>
       )}
 
-      {/* Metrics */}
+      {/* T19: Métricas reales del backend (fallback a "—" mientras cargan) */}
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {METRICS.map((m, i) => (
+        {[
+          {
+            icon: Building2,
+            label: "Propiedades publicadas",
+            value: stats ? String(stats.publishedProperties) : "—",
+            sub: stats ? `${stats.totalProperties} total` : "cargando…",
+          },
+          {
+            icon: Eye,
+            label: "Total propiedades",
+            value: stats ? String(stats.totalProperties) : "—",
+            sub: "en base de datos",
+          },
+          {
+            icon: MessageCircle,
+            label: "Leads capturados",
+            value: stats ? String(stats.totalLeads) : "—",
+            sub: "todos los canales",
+          },
+          {
+            icon: TrendingUp,
+            label: "Mensajes pendientes",
+            value: stats ? String(stats.pendingMessages) : "—",
+            sub: "en cola de procesamiento",
+          },
+        ].map((m, i) => (
           <motion.div
             key={m.label}
             initial={{ opacity: 0, y: 12 }}
@@ -100,8 +131,8 @@ export default function DashboardPage() {
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[hsl(var(--brand))]/15 text-[hsl(var(--brand))]">
                 <m.icon className="h-4 w-4" />
               </div>
-              <span className="text-[11px] uppercase tracking-wider text-emerald-300">
-                {m.delta}
+              <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                {m.sub}
               </span>
             </div>
             <div className="mt-4 text-2xl font-semibold tracking-tight">{m.value}</div>
