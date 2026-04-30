@@ -2,12 +2,17 @@ import type { Property, SearchFilters, SearchResult } from "@/types/property";
 
 /**
  * API client for the InitCore backend (n8n Web API branch).
- * All requests are routed through a unified webhook endpoint.
+ *
+ * Todas las peticiones van a /api/n8n — un proxy Next.js que reenvía al
+ * webhook de n8n server-to-server. Esto elimina los errores CORS del browser
+ * que ocurren cuando el frontend (Vercel) intenta llamar directamente a ngrok.
+ *
+ * Variables de entorno necesarias en Vercel (server-side, sin NEXT_PUBLIC_):
+ *   N8N_WEBHOOK_URL  — URL completa del webhook de n8n
+ *   N8N_API_KEY      — API key para el workflow (opcional)
  */
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
-const API_KEY  = process.env.NEXT_PUBLIC_API_KEY ?? "";
-const USE_MOCK = !API_BASE || process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
+const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK_DATA === "true";
 
 export interface ApiError extends Error {
   status?: number;
@@ -24,27 +29,17 @@ export interface DashboardStats {
 
 async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
   if (USE_MOCK) {
-    console.warn("Using Mock Data - Configura NEXT_PUBLIC_API_BASE_URL para usar la API real");
+    console.warn("Mock Data activo — configura N8N_WEBHOOK_URL en Vercel para datos reales");
     return mockFallback<T>(operation, payload);
   }
 
-  // ngrok-skip-browser-warning: requerido para evitar que ngrok intercepte con HTML
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "ngrok-skip-browser-warning": "true",
-  };
-  if (API_KEY) {
-    headers["x-api-key"] = API_KEY;
-  }
-
-  const res = await fetch(API_BASE, {
+  // Llamamos al proxy Next.js en /api/n8n (mismo origen → sin CORS)
+  const res = await fetch("/api/n8n", {
     method: "POST",
-    headers,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ operation, payload }),
   });
 
-  // Leer siempre como texto para evitar "Unexpected end of JSON input"
-  // cuando el body es vacío o es HTML (error de ngrok/nginx)
   const text = await res.text();
 
   if (!res.ok) {
@@ -56,18 +51,6 @@ async function n8nRequest<T>(operation: string, payload: any = {}): Promise<T> {
     err.status = res.status;
     err.body = body;
     throw err;
-  }
-
-  if (!text) {
-    throw new Error(
-      "El servidor no envió respuesta. Verifica que el workflow de n8n esté activo y publicado."
-    );
-  }
-
-  if (text.trim().startsWith("<")) {
-    throw new Error(
-      "El servidor devolvió HTML. Verifica que ngrok esté corriendo y que el workflow esté importado en n8n."
-    );
   }
 
   try {
@@ -89,7 +72,6 @@ export async function searchProperties(filters: SearchFilters): Promise<SearchRe
   };
 }
 
-// T17: Corregido — usa operación dedicada get_property en lugar de ai_search con prompt hack
 export async function getProperty(id: string): Promise<Property | null> {
   const result = await n8nRequest<Property | null>("get_property", { id });
   return result ?? null;
@@ -108,7 +90,6 @@ export async function getDashboardProperties(userId?: string): Promise<Property[
   return n8nRequest<Property[]>("ai_search", { prompt: "mis propiedades" });
 }
 
-// T19: Nueva función — obtiene métricas reales del backend
 export async function getStats(): Promise<DashboardStats> {
   return n8nRequest<DashboardStats>("get_stats", {});
 }
