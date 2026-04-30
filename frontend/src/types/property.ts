@@ -28,6 +28,7 @@ export interface Property {
 
 export interface SearchFilters {
   q?: string;
+  region?: string;
   comuna?: string;
   minPrice?: number;
   maxPrice?: number;
