@@ -87,7 +87,7 @@ export async function publishBulkProperties(properties: any[], userId?: string):
 }
 
 export async function getDashboardProperties(userId?: string): Promise<Property[]> {
-  return n8nRequest<Property[]>("ai_search", { prompt: "mis propiedades" });
+  return n8nRequest<Property[]>("ai_search", { prompt: "mis propiedades", userId });
 }
 
 export async function getStats(): Promise<DashboardStats> {

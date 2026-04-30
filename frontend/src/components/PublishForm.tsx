@@ -18,10 +18,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { publishProperty } from "@/services/api";
+import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { REGIONES_CHILE, getComunasByRegion, REGION_NAMES } from "@/lib/chile-regiones";
 
 export function PublishForm() {
+  const { user } = useAuth();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -85,6 +87,7 @@ export function PublishForm() {
         bathrooms: Number(form.bathrooms),
         sqm: Number(form.sqm),
         images,
+        userId: user?.uid,
       });
       setDone(true);
       setTimeout(() => router.push(`/property/${created.id}`), 1200);
