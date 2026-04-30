@@ -1,70 +1,77 @@
 # PROJECT CONTEXT — ARVIA AI AUTOMATION
+
 > **Fuente de verdad absoluta del sistema.**
 > Toda IA o desarrollador debe leer este documento antes de modificar cualquier componente.
-> **Última actualización:** 2026-04-30 (v1.5 — API Key validation, UNNEST bulk insert, Auditoría de seguridad)
+> Última actualización: 2026-04-28 (v1.1 Bulk Support & Architecture Cleanup)
 
 ---
 
-## 1. Arquitectura General
+## 1. Arquitectura General (Arvia v1.1)
 
+El sistema opera en una arquitectura híbrida producción-local optimizada para escalabilidad:
+
+- **Frontend**: Next.js 14 alojado en **Vercel** (arvia-nu.vercel.app).
+- **Identidad**: **Firebase Authentication** (Google + Email/Password).
+- **Cerebro (n8n)**: Orquestación alojada localmente via Docker. Se han separado los flujos para mayor estabilidad:
+    - **Workflow Telegram**: Gestiona el bot omnicanal. (Archivo: `InitCore Telegram AI Agent (Full) [completo].json`)
+    - **Workflow Web API**: Gestiona búsquedas, publicaciones y carga masiva. (Archivo: `web_api_workflow_final.json`)
+- **Túnel**: Túnel fijo **ngrok** con dominio estático. Requiere `authtoken` verificado.
+- **Persistencia**: PostgreSQL local (Docker).
+- **LLM**: Ollama (llama3) para clasificación y generación de respuestas.
+
+---
+
+## 2. Capas del Sistema
+
+### 2.1 Identidad (Firebase)
+- **Proveedor**: Firebase Auth.
+- **Dominios Autorizados**: `localhost`, `arvia-nu.vercel.app`.
+
+### 2.2 Frontend (Arvia UI)
+- **Framework**: Next.js 14 (App Router).
+- **Styling**: Tailwind CSS + Framer Motion.
+- **API Client**: `src/services/api.ts` centraliza las peticiones con headers de bypass para ngrok (`ngrok-skip-browser-warning: 69420`).
+
+---
+
+## 3. Base de Datos (PostgreSQL)
+
+### 3.1 Tablas Principales
+- `properties`: Catálogo inmobiliario.
+- `messages`: Historial de conversaciones (Omnicanal).
+- `leads`: Captura de interesados.
+- `user_state`: Máquina de estados para el Wizard de Telegram.
+
+### 3.2 Acceso Local
+- **Puerto Externo**: `5433`
+- **Docker Stack**: Gestionado por `docker-compose.yml` en la raíz.
+
+---
+
+## 4. Infraestructura y Despliegue
+
+### 4.1 Túnel Fijo (ngrok)
+- **Dominio**: `atrium-pony-reburial.ngrok-free.dev`
+- **Configuración**: Ejecutar `ngrok config add-authtoken TU_TOKEN` antes de iniciar.
+
+### 4.2 Scripts de Inicio
+- **`start-n8n.bat`**: Levanta Docker y el túnel ngrok automáticamente.
+
+---
+
+## 5. Change Log
+
+### [2026-04-28] - Arvia v1.1 Bulk Update
+- **Descripción**: Añadida capacidad de carga masiva de propiedades. Generación de dataset de muestra (`propiedades_muestra_chile.csv`). Arreglo de CORS y bypass de ngrok. Reestructuración de workflows en n8n en dos archivos separados para evitar errores de importación.
+
+---
+
+## 6. Instrucciones para la IA / Handoff
+
+```markdown
+- Ubicación: D:\InitCore
+- Frontend: Next.js en /frontend
+- Backend: n8n local (Workflows separados: Telegram y Web API)
+- DB: Postgres en puerto 5433
+- Importante: Siempre usar el header de bypass para ngrok en peticiones API.
 ```
-Browser (Vercel)
-  └─▶ /api/n8n  [Next.js proxy — mismo origen, sin CORS]
-        └─▶ ngrok (atrium-pony-reburial.ngrok.io/webhook/web-api)
-              └─▶ n8n 2.17.3 (Docker local)
-                    └─▶ PostgreSQL 15 (Docker local, puerto 5433)
-```
-
-- **Frontend**: Next.js 14 — `arvia-nu.vercel.app`
-- **Auth**: Firebase Auth (Google + Email/Password)
-- **Proxy API**: `frontend/src/app/api/n8n/route.ts` — elimina errores CORS
-- **Backend**: n8n 2.17.3 con workflow maestro `web_api_workflow_v7.json`
-- **IA primaria**: Claude 3 Sonnet (nodo Anthropic n8n)
-- **IA fallback**: Hermes 3 8b (Ollama local, `host.docker.internal:11434`)
-- **Túnel**: ngrok dominio fijo `atrium-pony-reburial` (no cambia al reiniciar)
-
----
-
-## 2. Archivos Clave
-
-| Archivo | Propósito |
-|---|---|
-| `web_api_workflow_v7.json` | **Workflow maestro** — importar y activar en n8n |
-| `init.sql` | Schema PostgreSQL completo |
-| `docker-compose.yml` | Docker Stack (n8n + PostgreSQL) |
-| `ARVIA_START_PRO.bat` | Lanzador: Docker + ngrok + abre apps |
-| `frontend/src/app/api/n8n/route.ts` | Proxy Next.js (elimina CORS) |
-| `frontend/src/services/api.ts` | Cliente API con unwrap del envelope n8n |
-| `frontend/src/components/BulkImportModal.tsx` | Carga masiva CSV/XLSX |
-| `frontend/src/components/DashboardTable.tsx` | Tabla con toggle publicar/ocultar |
-| `plantilla_arvia.csv` | Plantilla para importación masiva |
-| `contexto_an.md` | Memoria técnica detallada (en .gitignore, no se sube) |
-
----
-
-## 3. Operaciones de la API (workflow v7)
-
-Todas las peticiones: `POST /webhook/web-api` con `{ operation, payload }`.
-
-| Operación | Payload | Descripción |
-|---|---|---|
-| `ai_search` | `{ prompt, userId? }` | Búsqueda con IA, filtra por userId si se pasa |
-| `publish` | `{ title, comuna, price, userId, ... }` | Publica una propiedad |
-| `publish_bulk` | `{ properties: [], userId }` | Importación masiva |
-| `get_property` | `{ id }` | Obtener propiedad por ID |
-| `get_stats` | `{}` | Métricas del dashboard |
-| `toggle_status` | `{ id, status, userId? }` | Cambiar status a `published` o `draft` |
-
-**⚠️ Formato respuesta:** n8n v7 envuelve SIEMPRE en `{ success, data, count, timestamp }`.
-El cliente `api.ts` desenvuelve con `unwrapN8n()` en cada método.
-
----
-
-## 4. Base de Datos
-
-### Puerto: `5433` (externo) → `5432` (interno Docker)
-
-### Tabla `properties` (campos principales)
-```
-id (bigserial), user_id (text), title, price, region, comuna,
-bedrooms, bathrooms, sqm, images

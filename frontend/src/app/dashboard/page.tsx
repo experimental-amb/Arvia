@@ -7,7 +7,7 @@ import { Building2, Eye, MessageCircle, PlusCircle, TrendingUp } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { DashboardTable } from "@/components/DashboardTable";
 import { useAuth } from "@/lib/auth-context";
-import { getDashboardProperties, getStats, togglePropertyStatus, type DashboardStats } from "@/services/api";
+import { getDashboardProperties, getStats, type DashboardStats } from "@/services/api";
 import type { Property } from "@/types/property";
 import { BulkImportModal } from "@/components/BulkImportModal";
 
@@ -149,6 +149,8 @@ export default function DashboardPage() {
             Ver mercado →
           </Link>
         </div>
-        <DashboardTable
-          properties={properties}
-          loading={loadi
+        <DashboardTable properties={properties} loading={loading} />
+      </section>
+    </div>
+  );
+}
