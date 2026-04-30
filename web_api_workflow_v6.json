@@ -138,23 +138,54 @@
     },
     {
       "parameters": {
+        "model": "claude-3-sonnet-20240229",
+        "prompt": "={{ $json.payload?.prompt || 'mis propiedades' }}",
+        "systemPrompt": "Eres un asistente inmobiliario chileno. Extrae filtros de búsqueda del prompt del usuario. Devuelve SOLO un objeto JSON válido con estos campos: {\"region\":string|null,\"comuna\":string|null,\"bedrooms\":int|null,\"bathrooms\":int|null,\"max_price\":int|null,\"property_type\":\"departamento\"|\"casa\"|null,\"transaction_type\":\"venta\"|\"arriendo\"|null}. Si el usuario pide sus propias propiedades, devuelve un JSON vacío {}."
+      },
+      "id": "c1a2u3d4-e5a6-4b7c-8d9e-f0g1h2i3j4k5",
+      "name": "Claude AI",
+      "type": "n8n-nodes-base.anthropic",
+      "typeVersion": 1,
+      "position": [700, 600],
+      "continueOnFail": true,
+      "credentials": { "anthropicApi": { "id": "anthropic-cred-id", "name": "Anthropic account" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ !!$json.__error || !$json.text }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "f1a2l3l4-b5a6-4c7d-8e9f-g0h1i2j3k4l5",
+      "name": "Should Fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 600]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://host.docker.internal:11434/api/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model:'llama3', system:'Eres un asistente inmobiliario chileno. Extrae filtros. Devuelve SOLO JSON valido: {\"region\":string|null,\"comuna\":string|null,\"bedrooms\":int|null,\"bathrooms\":int|null,\"max_price\":int|null,\"property_type\":\"departamento\"|\"casa\"|null,\"transaction_type\":\"venta\"|\"arriendo\"|null}', prompt:$json.payload.prompt||'propiedades disponibles', stream:false, options:{temperature:0.1} }) }}",
+        "jsonBody": "={{ JSON.stringify({ model:'hermes3:8b', system:'Eres un asistente inmobiliario chileno. Extrae filtros. Devuelve SOLO JSON valido: {\"region\":string|null,\"comuna\":string|null,\"bedrooms\":int|null,\"bathrooms\":int|null,\"max_price\":int|null,\"property_type\":\"departamento\"|\"casa\"|null,\"transaction_type\":\"venta\"|\"arriendo\"|null}', prompt:$node[\"Extract Web Data\"].json.payload.prompt||'propiedades disponibles', stream:false, options:{temperature:0.1} }) }}",
         "options": { "timeout": 15000 }
       },
-      "id": "d0e1f2a3-b4c5-4d6e-bf8a-b9c0d1e2f3a4",
-      "name": "API AI Extract",
+      "id": "e7f8a9b0-c1d2-4e3f-8a9b-c0d1e2f3a4b5",
+      "name": "Hermes Fallback",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [750, 700],
+      "position": [1100, 750],
       "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "let filters = {};\ntry {\n  const raw = ($input.first().json.response || $input.first().json.payload?.prompt || '');\n  const m = raw.match(/\\{[^{}]*\\}/s);\n  if (m) filters = JSON.parse(m[0]);\n} catch(e) {}\nconst userId = $input.first().json.payload?.userId || null;\nreturn [{ json: { filters: { region: typeof filters.region==='string'?filters.region.trim():null, comuna:typeof filters.comuna==='string'?filters.comuna.trim():null, bedrooms:Number.isInteger(filters.bedrooms)?Math.max(0,filters.bedrooms):null, bathrooms:Number.isInteger(filters.bathrooms)?Math.max(0,filters.bathrooms):null, max_price:typeof filters.max_price==='number'?filters.max_price:null, property_type:['departamento','casa'].includes(filters.property_type)?filters.property_type:null, transaction_type:['venta','arriendo'].includes(filters.transaction_type)?filters.transaction_type:null, user_id: userId } } }];"
+        "jsCode": "let filters = {};\ntry {\n  const raw = ($input.first().json.response || $input.first().json.text || '');\n  const m = raw.match(/\\{[^{}]*\\}/s);\n  if (m) filters = JSON.parse(m[0]);\n} catch(e) {}\nconst userId = $node[\"Extract Web Data\"].json.payload?.userId || null;\nreturn [{ json: { filters: { region: typeof filters.region==='string'?filters.region.trim():null, comuna:typeof filters.comuna==='string'?filters.comuna.trim():null, bedrooms:Number.isInteger(filters.bedrooms)?Math.max(0,filters.bedrooms):null, bathrooms:Number.isInteger(filters.bathrooms)?Math.max(0,filters.bathrooms):null, max_price:typeof filters.max_price==='number'?filters.max_price:null, property_type:['departamento','casa'].includes(filters.property_type)?filters.property_type:null, transaction_type:['venta','arriendo'].includes(filters.transaction_type)?filters.transaction_type:null, user_id: userId } } }];"
       },
       "id": "e1f2a3b4-c5d6-4e7f-8a9b-c0d1e2f3a4b5",
       "name": "Parse API Filters",
@@ -248,7 +279,7 @@
     "Switch API Op": {
       "main": [
         [{ "node": "Validar Publish",   "type": "main", "index": 0 }],
-        [{ "node": "API AI Extract",    "type": "main", "index": 0 }],
+        [{ "node": "Claude AI",         "type": "main", "index": 0 }],
         [{ "node": "Extract Bulk Items","type": "main", "index": 0 }],
         [{ "node": "API Get Property",  "type": "main", "index": 0 }],
         [{ "node": "API Get Stats",     "type": "main", "index": 0 }],
@@ -260,7 +291,14 @@
     "Extract Bulk Items":     { "main": [[{ "node": "API Bulk Insert",        "type": "main", "index": 0 }]] },
     "API Bulk Insert":        { "main": [[{ "node": "Agregar Resultados Bulk","type": "main", "index": 0 }]] },
     "Agregar Resultados Bulk":{ "main": [[{ "node": "Format Response",        "type": "main", "index": 0 }]] },
-    "API AI Extract":         { "main": [[{ "node": "Parse API Filters",      "type": "main", "index": 0 }]] },
+    "Claude AI":              { "main": [[{ "node": "Should Fallback?",       "type": "main", "index": 0 }]] },
+    "Should Fallback?":       {
+      "main": [
+        [{ "node": "Hermes Fallback",   "type": "main", "index": 0 }],
+        [{ "node": "Parse API Filters", "type": "main", "index": 0 }]
+      ]
+    },
+    "Hermes Fallback":        { "main": [[{ "node": "Parse API Filters",      "type": "main", "index": 0 }]] },
     "Parse API Filters":      { "main": [[{ "node": "API Query Props",        "type": "main", "index": 0 }]] },
     "API Query Props":        { "main": [[{ "node": "Format Response",        "type": "main", "index": 0 }]] },
     "API Get Property":       { "main": [[{ "node": "Format Response",        "type": "main", "index": 0 }]] },
