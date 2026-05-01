@@ -67,3 +67,14 @@ web_api_workflow_v3.json
 
 # Datos reales / sensibles (solo .csv de datos reales ya cubiertos arriba)
 # propiedades_muestra_chile.csv se mantiene trackeada (datos de muestra, no sensibles)
+
+# IA Local / Hermes
+hermes*
+integracion_anthropic.md
+implementation_plan.md
+IA_HYBRID.md
+
+# 🔐 Private Infrastructure (Arvia Pro)
+invoicing_module.sql
+web_api_workflow_v*.json
+n8n_workflow_docs.html
