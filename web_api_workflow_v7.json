@@ -20,7 +20,7 @@
     },
     {
       "parameters": {
-        "jsCode": "try {\n  const raw = $input.first().json;\n  const headers = raw.headers || {};\n  const body = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\n\n  // ── API KEY VALIDATION ──────────────────────────────────────────────────────\n  const EXPECTED_KEY = 'arvia-dev-key-changeme';\n  const receivedKey = headers['x-api-key'] || headers['authorization'] || body.apiKey || '';\n  const cleanKey = String(receivedKey).replace(/^Bearer\\s+/i, '');\n  if (!cleanKey || cleanKey !== EXPECTED_KEY) {\n    return [{ json: { __op: 'error', __error: true, success: false, error: 'AUTH_FAILED: API key invalida o ausente', code: 401 } }];\n  }\n\n  // ── OPERATION ROUTING ───────────────────────────────────────────────────────\n  const operation = String(body.operation || 'ai_search');\n  const VALID_OPS = ['search','ai_search','publish','publish_bulk','get_property','get_stats','toggle_status'];\n  if (!VALID_OPS.includes(operation)) {\n    return [{ json: { __op: 'error', __error: true, success: false, error: 'Operacion desconocida: ' + operation, code: 400 } }];\n  }\n  const payload = (body.payload && typeof body.payload === 'object') ? body.payload : body;\n  return [{ json: { __op: operation, operation, payload, source: 'web', requestedAt: new Date().toISOString() } }];\n} catch(e) {\n  return [{ json: { __op: 'error', __error: true, success: false, error: e.message, code: 500 } }];\n}"
+        "jsCode": "try {\n  const raw = $input.first().json;\n  const headers = raw.headers || {};\n  const body = (raw.body && typeof raw.body === 'object') ? raw.body : raw;\n\n  // ── API KEY VALIDATION ──────────────────────────────────────────────────────\n  const EXPECTED_KEY = 'arvia-dev-key-changeme';\n  const receivedKey = headers['x-api-key'] || headers['authorization'] || body.apiKey || '';\n  const cleanKey = String(receivedKey).replace(/^Bearer\\s+/i, '');\n  if (!cleanKey || cleanKey !== EXPECTED_KEY) {\n    return [{ json: { __op: 'error', __error: true, success: false, error: 'AUTH_FAILED: API key invalida o ausente', code: 401 } }];\n  }\n\n  // ── OPERATION ROUTING ───────────────────────────────────────────────────────\n  const operation = String(body.operation || 'ai_search');\n  const VALID_OPS = ['search','ai_search','publish','publish_bulk','get_property','get_stats','toggle_status','list_properties'];\n  if (!VALID_OPS.includes(operation)) {\n    return [{ json: { __op: 'error', __error: true, success: false, error: 'Operacion desconocida: ' + operation, code: 400 } }];\n  }\n  const payload = (body.payload && typeof body.payload === 'object') ? body.payload : body;\n  return [{ json: { __op: operation, operation, payload, source: 'web', requestedAt: new Date().toISOString() } }];\n} catch(e) {\n  return [{ json: { __op: 'error', __error: true, success: false, error: e.message, code: 500 } }];\n}"
       },
       "id": "b2c3d4e5-f6a7-4b8c-9d0e-f1a2b3c4d5e6",
       "name": "Extract Web Data",
@@ -161,6 +161,17 @@
                 ],
                 "combinator": "and"
               }
+            },
+            {
+              "conditions": {
+                "string": [
+                  {
+                    "value1": "={{ $json.__op }}",
+                    "value2": "list_properties"
+                  }
+                ]
+              },
+              "outputKey": "list_properties"
             }
           ]
         },
@@ -518,6 +529,42 @@
           "name": "Postgres account"
         }
       }
+    },
+    {
+      "id": "l1s2t3p4-r5o6-4p7s-8n9o-d0e1f2g3h4i5",
+      "name": "API List Properties",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [
+        1100,
+        900
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id::text, user_id, title, description, price::float,\n       region, comuna, address, bedrooms, bathrooms, sqm::float,\n       images, status, property_type, transaction_type, source,\n       created_at::text as \"createdAt\"\nFROM properties\nWHERE ($1::text IS NULL OR user_id = $1)\nORDER BY created_at DESC\nLIMIT 200;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$json.payload?.userId ?? null]) }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "pg-local",
+          "name": "PostgreSQL Local"
+        }
+      }
+    },
+    {
+      "id": "f0r1m2a3-t4l5-4i6s7-t8r9-e0s1p2o3n4s5",
+      "name": "Format List Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(r => r.json);\nconst errItem = rows.find(r => r.__error);\nif (errItem) {\n  return [{ json: { success: false, error: errItem.error, code: 500 } }];\n}\nconst properties = rows.map(p => ({\n  id:               String(p.id),\n  userId:           p.user_id || null,\n  title:            p.title || '',\n  description:      p.description || '',\n  price:            Number(p.price) || 0,\n  region:           p.region || '',\n  comuna:           p.comuna || '',\n  address:          p.address || '',\n  bedrooms:         Number(p.bedrooms) || 0,\n  bathrooms:        Number(p.bathrooms) || 0,\n  sqm:              Number(p.sqm) || 0,\n  images:           Array.isArray(p.images) ? p.images : [],\n  status:           p.status || 'draft',\n  property_type:    p.property_type || null,\n  transaction_type: p.transaction_type || null,\n  createdAt:        p.createdAt || null\n}));\nreturn [{ json: { success: true, data: properties, count: properties.length, timestamp: new Date().toISOString() } }];"
+      }
     }
   ],
   "pinData": {},
@@ -770,6 +817,45 @@
       ]
     },
     "API Toggle Status": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "c3d4e5f6-a7b8-4c9d-ae1f-a2b3c4d5e6f7": {
+      "main": [
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [
+          {
+            "node": "API List Properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API List Properties": {
+      "main": [
+        [
+          {
+            "node": "Format List Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format List Response": {
       "main": [
         [
           {
