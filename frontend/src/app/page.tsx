@@ -234,9 +234,9 @@ export default function HomePage() {
             <span className="font-bold text-xl tracking-tight">ARVIA</span>
           </div>
           <div className="flex gap-8 text-sm text-muted-foreground">
-            <Link href="#" className="hover:text-white transition">Términos</Link>
-            <Link href="#" className="hover:text-white transition">Privacidad</Link>
-            <Link href="#" className="hover:text-white transition">Documentación</Link>
+            <Link href="/terminos" className="hover:text-white transition">Términos</Link>
+            <Link href="/privacidad" className="hover:text-white transition">Privacidad</Link>
+            <Link href="/search" className="hover:text-white transition">Buscar propiedades</Link>
           </div>
           <div className="text-sm text-muted-foreground">
             © {new Date().getFullYear()} Arvia Tech. Todos los derechos reservados.

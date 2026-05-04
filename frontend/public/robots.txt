@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /billing
+Disallow: /publish
+Disallow: /api/
+
+Sitemap: https://arvia-nu.vercel.app/sitemap.xml
