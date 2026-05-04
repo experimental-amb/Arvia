@@ -65,7 +65,17 @@ export async function n8nRequest<T>(operation: string, payload: any = {}, attemp
 }
 
 function unwrapN8n<T>(raw: any): T {
-  if (raw && typeof raw === "object" && "success" in raw && "data" in raw) {
+  if (raw && typeof raw === "object" && "success" in raw) {
+    if (!raw.success) {
+      const err: ApiError = new Error(
+        raw.error === "AUTH_FAILED"
+          ? "API key incorrecta o no configurada en n8n. Revisa WEB_API_KEY."
+          : (raw.error ?? "La operacion fallo en el servidor.")
+      );
+      err.status = raw.code ?? 400;
+      err.body = raw;
+      throw err;
+    }
     return raw.data as T;
   }
   return raw as T;
@@ -96,7 +106,10 @@ export async function getProperty(id: string): Promise<Property | null> {
 export async function publishProperty(input: any): Promise<Property> {
   const res = await n8nRequest<any>("publish", input);
   const data = unwrapN8n<any>(res);
-  return { ...input, id: String(data?.id ?? data) };
+  if (!data?.id) {
+    throw new Error("No se recibio ID de la propiedad creada. Verifica que el workflow este activo en n8n.");
+  }
+  return { ...input, id: String(data.id) };
 }
 
 export async function publishBulkProperties(

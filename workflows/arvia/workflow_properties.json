@@ -27,7 +27,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "const EXPECTED_KEY = $env.WEB_API_KEY;\nif (!EXPECTED_KEY) throw new Error('WEB_API_KEY not set in environment');\nconst body = $input.first().json?.body ?? $input.first().json;\nconst apiKey = $input.first().headers?.['x-api-key'];\nif (apiKey !== EXPECTED_KEY) {\n  return [{ json: { __op: 'auth_error', __rid: body.__rid } }];\n}\nconst op = body.operation;\nconst payload = body.payload ?? {};\nreturn [{ json: { __op: op, __rid: body.__rid, ...payload } }];"
+        "jsCode": "const EXPECTED_KEY = $env.WEB_API_KEY;\nif (!EXPECTED_KEY) throw new Error('WEB_API_KEY not set in environment');\nconst item = $input.first().json;\nconst body = item.body ?? item;\nconst headers = item.headers ?? {};\nconst apiKey = headers['x-api-key'];\nif (apiKey !== EXPECTED_KEY) {\n  return [{ json: { __op: 'auth_error', __rid: body.__rid } }];\n}\nconst op = body.operation;\nconst payload = body.payload ?? {};\nreturn [{ json: { __op: op, __rid: body.__rid, ...payload } }];"
       }
     },
     {
@@ -247,7 +247,7 @@
         "operation": "executeQuery",
         "query": "INSERT INTO properties (user_id, title, description, price, currency, region, comuna, address, bedrooms, bathrooms, sqm, property_type, operation, status, images, tags) VALUES ($1,$2,$3,$4::numeric,$5,$6,$7,$8,$9::int,$10::int,$11::numeric,$12,$13,$14,$15::jsonb,$16::jsonb) RETURNING id, title, status",
         "additionalFields": {
-          "queryParams": "={{ [$json.userId,$json.title,$json.description||'',$json.price||0,$json.currency||'CLP',$json.region||'',$json.comuna||'',$json.address||'',$json.bedrooms||0,$json.bathrooms||0,$json.sqm||0,$json.property_type||'departamento',$json.operation||'venta',$json.status||'published',JSON.stringify($json.images||[]),JSON.stringify($json.tags||[])] }}"
+          "queryParams": "={{ [$json.userId,$json.title,$json.description||'',$json.price||0,$json.currency||'CLP',$json.region||'',$json.comuna||'',$json.address||'',$json.bedrooms||0,$json.bathrooms||0,$json.sqm||0,$json.property_type||'departamento',$json.operation_type||'venta',$json.status||'published',JSON.stringify($json.images||[]),JSON.stringify($json.tags||[])] }}"
         }
       }
     },
@@ -263,7 +263,9 @@
       "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO properties (user_id, title, description, price, currency, region, comuna, address, bedrooms, bathrooms, sqm, status) SELECT $1::text, t.title, COALESCE(t.description,''), COALESCE(t.price,0)::numeric, COALESCE(t.currency,'CLP'), COALESCE(t.region,''), COALESCE(t.comuna,''), COALESCE(t.address,''), COALESCE(t.bedrooms,0)::int, COALESCE(t.bathrooms,0)::int, COALESCE(t.sqm,0)::numeric, 'published' FROM UNNEST($2::text[],$3::text[],$4::numeric[],$5::text[],$6::text[],$7::text[],$8::text[],$9::int[],$10::int[],$11::numeric[]) AS t(title,description,price,currency,region,comuna,address,bedrooms,bathrooms,sqm) RETURNING id",
-        "additionalFields": {\n          "queryParams": "={{ [\n  $json.userId,\n  $json.titles || [],\n  $json.descriptions || [],\n  ($json.prices || []).map(v => Number(v.toString().replace(/[^0-9.-]/g, '')) || 0),\n  $json.currencies || [],\n  $json.regions || [],\n  $json.comunas || [],\n  $json.addresses || [],\n  ($json.bedrooms || []).map(v => parseInt(v) || 0),\n  ($json.bathrooms || []).map(v => parseInt(v) || 0),\n  ($json.sqms || []).map(v => Number(v.toString().replace(/[^0-9.-]/g, '')) || 0)\n] }}"\n        }
+        "additionalFields": {
+          "queryParams": "={{ [$json.userId,$json.titles||[],$json.descriptions||[],($json.prices||[]).map(v=>Number(String(v).replace(/[^0-9.-]/g,''))||0),$json.currencies||[],$json.regions||[],$json.comunas||[],$json.addresses||[],($json.bedrooms||[]).map(v=>parseInt(v)||0),($json.bathrooms||[]).map(v=>parseInt(v)||0),($json.sqms||[]).map(v=>Number(String(v).replace(/[^0-9.-]/g,''))||0)] }}"
+        }
       }
     },
     {
@@ -344,7 +346,7 @@
         300
       ],
       "parameters": {
-        "jsCode": "const all = $input.all();\nconst first = all[0]?.json ?? {};\nconst op = first.__op;\n\nif (op === 'auth_error') {\n  return [{ json: { success: false, error: 'AUTH_FAILED', code: 401 } }];\n}\n\n// Operaciones que retornan arrays de filas\nif (['list_properties','ai_search'].includes(op)) {\n  const rows = all.filter(i => !i.json?.error && i.json !== undefined);\n  return [{ json: { success: true, data: rows.map(i => i.json), count: rows.length, op } }];\n}\nif (op === 'get_stats') {\n  const row = all[0]?.json ?? {};\n  return [{ json: { success: true, data: {\n    totalProperties: Number(row.total_properties ?? 0),\n    publishedProperties: Number(row.published_properties ?? 0),\n    totalLeads: Number(row.total_leads ?? 0),\n    pendingMessages: Number(row.pending_messages ?? 0)\n  }}}];\n}\nif (op === 'delete_property') {\n  return [{ json: { success: all.length > 0, data: { deleted: all.length > 0 }, op } }];\n}\nif (op === 'publish_bulk') {\n  const inserted = all.filter(i => i.json?.id).length;\n  const hasErrors = all.some(i => i.json?.error);\n  return [{ json: { \n    success: inserted > 0 && !hasErrors, \n    data: { inserted, count: inserted }, \n    error: hasErrors ? 'DB_BULK_PARTIAL_FAILURE' : (inserted === 0 ? 'NO_ROWS_INSERTED' : undefined),\n    op \n  } }];\n}\n// publish, toggle, update, get_property\nconst row = all[0]?.json ?? {};\nreturn [{ json: { success: !!row.id, data: row, op } }];"
+        "jsCode": "const all = $input.all();\nconst first = all[0]?.json ?? {};\nconst op = first.__op;\n\nif (op === 'auth_error') {\n  return [{ json: { success: false, error: 'AUTH_FAILED', code: 401 } }];\n}\nif (['list_properties','ai_search'].includes(op)) {\n  const rows = all.filter(i => !i.json?.error && i.json !== undefined);\n  return [{ json: { success: true, data: rows.map(i => i.json), count: rows.length, op } }];\n}\nif (op === 'get_stats') {\n  const row = all[0]?.json ?? {};\n  return [{ json: { success: true, data: {\n    totalProperties: Number(row.total_properties ?? 0),\n    publishedProperties: Number(row.published_properties ?? 0),\n    totalLeads: Number(row.total_leads ?? 0),\n    pendingMessages: Number(row.pending_messages ?? 0)\n  }}}];\n}\nif (op === 'delete_property') {\n  const deleted = all.filter(i => i.json?.id != null).length > 0;\n  return [{ json: { success: deleted, data: { deleted }, op } }];\n}\nif (op === 'publish_bulk') {\n  const inserted = all.filter(i => i.json?.id).length;\n  const hasErrors = all.some(i => i.json?.error);\n  return [{ json: { success: inserted > 0 && !hasErrors, data: { inserted, count: inserted }, error: hasErrors ? 'DB_BULK_PARTIAL_FAILURE' : (inserted === 0 ? 'NO_ROWS_INSERTED' : undefined), op } }];\n}\n// publish, toggle, update, get_property — single row\nconst row = all[0]?.json ?? {};\nif (!row.id) {\n  return [{ json: { success: false, error: 'NO_ROW_RETURNED', op } }];\n}\nreturn [{ json: { success: true, data: row, op } }];"
       }
     },
     {
@@ -555,7 +557,7 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1"
   },
