@@ -138,7 +138,11 @@ export default function DashboardPage() {
       await togglePropertyStatus(id, newStatus, user.uid);
       await refreshAll();
     } catch (err: any) {
-      toast.error(`Error al cambiar estado: ${err?.message}`);
+      toast({
+        title: "Error al cambiar estado",
+        description: err?.message || "No se pudo actualizar el estado de la propiedad.",
+        variant: "destructive",
+      });
     }
   };
 
