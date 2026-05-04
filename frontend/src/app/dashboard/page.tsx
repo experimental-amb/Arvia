@@ -52,16 +52,27 @@ export default function DashboardPage() {
 
   const loadSamples = async () => {
     if (!user) {
-      toast.error("Debes iniciar sesion para cargar datos.");
+      toast({
+        title: "Error de sesión",
+        description: "Debes iniciar sesion para cargar datos.",
+        variant: "destructive",
+      });
       return;
     }
     setIsLoadingSamples(true);
     try {
       await publishBulkProperties(SAMPLE_PROPERTIES, user.uid);
-      toast.success("¡Datos de muestra cargados con éxito!");
+      toast({
+        title: "¡Éxito!",
+        description: "Datos de muestra cargados con éxito.",
+      });
       await refreshAll();
     } catch (err: any) {
-      toast.error(`Error al cargar muestras: ${err?.message}`);
+      toast({
+        title: "Error al cargar muestras",
+        description: err?.message || "Ocurrió un error inesperado",
+        variant: "destructive",
+      });
     } finally {
       setIsLoadingSamples(false);
     }
@@ -82,27 +93,45 @@ export default function DashboardPage() {
 
   const handleDelete = async (id: string) => {
     if (!user) {
-      toast.error("Debes iniciar sesion para eliminar propiedades.");
+      toast({
+        title: "Error de sesión",
+        description: "Debes iniciar sesion para eliminar propiedades.",
+        variant: "destructive",
+      });
       return;
     }
     try {
       await deleteProperty(id, user.uid);
       setProperties((prev) => prev.filter((p) => p.id !== id));
       fetchStats();
-      toast.success("Propiedad eliminada correctamente.");
+      toast({
+        title: "Propiedad eliminada",
+        description: "La propiedad se ha eliminado correctamente.",
+      });
     } catch (err: any) {
-      toast.error(`Error al eliminar: ${err?.message ?? "desconocido"}`);
+      toast({
+        title: "Error al eliminar",
+        description: err?.message || "Ocurrió un error inesperado",
+        variant: "destructive",
+      });
     }
   };
 
   const handleEditSaved = async () => {
     await refreshAll();
-    toast.success("Propiedad actualizada correctamente.");
+    toast({
+      title: "Actualizado",
+      description: "Propiedad actualizada correctamente.",
+    });
   };
 
   const handleToggleStatus = async (id: string, newStatus: "published" | "draft") => {
     if (!user) {
-      toast.error("Debes iniciar sesion para cambiar el estado.");
+      toast({
+        title: "Error de sesión",
+        description: "Debes iniciar sesion para cambiar el estado.",
+        variant: "destructive",
+      });
       return;
     }
     try {

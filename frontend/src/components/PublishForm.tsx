@@ -76,7 +76,11 @@ export function PublishForm() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) {
-      toast.error("Debes iniciar sesion para publicar propiedades.");
+      toast({
+        title: "Error de sesión",
+        description: "Debes iniciar sesion para publicar propiedades.",
+        variant: "destructive",
+      });
       return;
     }
     setError(null);
@@ -96,7 +100,10 @@ export function PublishForm() {
         userId: user?.uid,
       });
       setDone(true);
-      toast.success("Propiedad publicada correctamente.");
+      toast({
+        title: "¡Éxito!",
+        description: "Propiedad publicada correctamente.",
+      });
       setTimeout(() => router.push(`/property/${created.id}`), 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo publicar.");
