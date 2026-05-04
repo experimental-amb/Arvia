@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ImageCarousel } from "./ImageCarousel";
+import { InvestmentCard } from "./InvestmentCard";
 import type { Property } from "@/types/property";
 import { formatPrice, formatSqm } from "@/lib/utils";
 
@@ -101,6 +102,12 @@ export function PropertyDetail({ property: p }: PropertyDetailProps) {
             <p className="mt-2 text-sm text-foreground/90 leading-relaxed">{p.aiSummary}</p>
           </motion.div>
         )}
+
+        <InvestmentCard 
+          investment={p.investment} 
+          price={p.price} 
+          comuna={p.comuna} 
+        />
 
         <div className="glass-card rounded-2xl p-5">
           <h3 className="text-sm font-semibold">Agenda una visita</h3>

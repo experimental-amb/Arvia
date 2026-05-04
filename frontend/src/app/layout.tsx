@@ -3,15 +3,16 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { Navbar } from "@/components/Navbar";
 import { AIAssistantButton } from "@/components/AIAssistantButton";
+import { Toaster } from "@/components/ui/toaster";
 
 export const metadata: Metadata = {
-  title: "Arvia — Tu agente inmobiliario con IA",
+  title: "Arvia | Inteligencia Inmobiliaria 24/7",
   description:
-    "Busca, publica y analiza propiedades con un asistente inteligente. Arvia combina datos, conversación y acción en una sola experiencia.",
+    "Transforma tu inventario inmobiliario en una máquina de ventas con IA. Análisis de inversión, búsqueda humana y omnicanalidad para agencias de alto rendimiento.",
   metadataBase: new URL("https://arvia.ai"),
   openGraph: {
-    title: "Arvia — AI Real Estate",
-    description: "El asistente inmobiliario que conversa, filtra y decide contigo.",
+    title: "Arvia — AI Real Estate Intelligence",
+    description: "El asistente inmobiliario que conversa, analiza y vende contigo.",
     type: "website",
   },
 };
@@ -32,6 +33,7 @@ export default function RootLayout({
           <Navbar />
           <main className="pt-24">{children}</main>
           <AIAssistantButton />
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

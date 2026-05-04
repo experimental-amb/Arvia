@@ -13,16 +13,15 @@ interface ChatMessage {
 
 const GREETING: ChatMessage = {
   role: "assistant",
-  content:
-    "Hola, soy el asistente de Arvia. ¿Buscas una propiedad, quieres publicar una o necesitas ayuda con dividendo estimado?",
+  content: "Hola, soy el asistente de Arvia. Buscas una propiedad, quieres publicar una o necesitas ayuda con dividendo estimado?",
 };
 
 export function AIAssistantButton() {
-  const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
+  const [open, setOpen]         = useState(false);
+  const [input, setInput]       = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([GREETING]);
-  const [loading, setLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading]   = useState(false);
+  const scrollRef               = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 9e9, behavior: "smooth" });
@@ -41,11 +40,7 @@ export function AIAssistantButton() {
     } catch {
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content:
-            "Ups, no pude responder ahora mismo. Intenta de nuevo o escríbeme por WhatsApp.",
-        },
+        { role: "assistant", content: "Ups, no pude responder ahora mismo. Intenta de nuevo o escribeme por WhatsApp." },
       ]);
     } finally {
       setLoading(false);
@@ -63,30 +58,19 @@ export function AIAssistantButton() {
         animate={{ y: [0, -4, 0] }}
         transition={{ y: { duration: 3, repeat: Infinity, ease: "easeInOut" } }}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-[hsl(var(--brand))] to-cyan-500 text-white shadow-glow"
-        aria-label="Abrir asistente InitCore"
+        aria-label="Abrir asistente Arvia"
       >
         <AnimatePresence mode="wait">
           {open ? (
-            <motion.span
-              key="x"
-              initial={{ rotate: -90, opacity: 0 }}
-              animate={{ rotate: 0, opacity: 1 }}
-              exit={{ rotate: 90, opacity: 0 }}
-            >
+            <motion.span key="x" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }}>
               <X className="h-5 w-5" />
             </motion.span>
           ) : (
-            <motion.span
-              key="bot"
-              initial={{ rotate: 90, opacity: 0 }}
-              animate={{ rotate: 0, opacity: 1 }}
-              exit={{ rotate: -90, opacity: 0 }}
-            >
+            <motion.span key="bot" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }}>
               <Bot className="h-5 w-5" />
             </motion.span>
           )}
         </AnimatePresence>
-        {/* Pulse ring */}
         <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-[hsl(var(--brand))]/40 animate-ping [animation-duration:2.5s]" />
       </motion.button>
 
@@ -106,9 +90,7 @@ export function AIAssistantButton() {
               </div>
               <div className="flex-1">
                 <div className="text-sm font-semibold">Asistente Arvia</div>
-                <div className="text-[11px] text-muted-foreground">
-                  Conectado · respuestas ~1s
-                </div>
+                <div className="text-[11px] text-muted-foreground">Busqueda inteligente de propiedades</div>
               </div>
             </header>
 
@@ -139,25 +121,17 @@ export function AIAssistantButton() {
             </div>
 
             <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                send();
-              }}
+              onSubmit={(e) => { e.preventDefault(); send(); }}
               className="border-t border-white/10 p-3"
             >
               <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-1.5">
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Pregúntame algo…"
+                  placeholder="Ej: depto 2 dorm en Santiago bajo 100M CLP"
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70 py-2"
                 />
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={!input.trim() || loading}
-                  className="h-8 w-8 rounded-xl"
-                >
+                <Button type="submit" size="icon" disabled={!input.trim() || loading} className="h-8 w-8 rounded-xl">
                   <Send className="h-3.5 w-3.5" />
                 </Button>
               </div>

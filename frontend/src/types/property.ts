@@ -33,6 +33,12 @@ export interface Property {
   createdAt?: string;
   aiSummary?: string;
   tags?: string[];
+  investment?: {
+    capRate?: number;
+    plusvalia?: number;
+    verdict?: string;
+    risk?: "bajo" | "medio" | "alto";
+  };
 }
 
 export interface SearchFilters {

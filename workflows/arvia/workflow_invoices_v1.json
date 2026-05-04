@@ -1,0 +1,97 @@
+{
+  "name": "Arvia - Invoice Processor v1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-invoice",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook Manual Upload",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "postOnEmailArrival": "onArrival",
+        "options": {
+          "downloadAttachments": true,
+          "forceUtf8": true
+        }
+      },
+      "name": "Email Invoice Trigger",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [100, 500],
+      "credentials": {
+        "imap": {
+          "id": "YOUR_IMAP_CREDENTIALS_ID",
+          "name": "Facturas Correo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceKey": "data"
+      },
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [400, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-3-haiku-20240307', max_tokens: 1024, messages: [{ role: 'user', content: 'Actúa como un experto contable. Extrae los datos de esta factura y responde SOLO con un JSON: { \"invoice_number\": \"\", \"invoice_date\": \"YYYY-MM-DD\", \"issuer\": \"\", \"total\": 0.0, \"iva\": 0.0, \"base\": 0.0, \"currency\": \"CLP|EUR|USD\", \"type\": \"ingreso|gasto\" }. Texto: ' + $json.text }] }) }}",
+        "options": {}
+      },
+      "name": "AI Invoice Analyzer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO invoices (user_id, invoice_number, invoice_date, issuer_name, concept, base_imponible, iva_cantidad, total, currency, type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) ON CONFLICT (invoice_number) DO UPDATE SET total = EXCLUDED.total;",
+        "options": {
+          "queryParams": "={{ JSON.stringify([$node['Webhook Manual Upload'].json.body.userId || 'system', $json.invoice_number, $json.invoice_date, $json.issuer, 'Factura procesada por IA', $json.base, $json.iva, $json.total, $json.currency, $json.type]) }}"
+        }
+      },
+      "name": "Save to DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [900, 400],
+      "credentials": {
+        "postgres": {
+          "id": "uZocfuSAUE49pDHV",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"Factura procesada con éxito\", \"data\": {{ $json }} }",
+        "options": {}
+      },
+      "name": "Final Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1150, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Manual Upload": { "main": [[{ "node": "Extract PDF Text", "index": 0 }]] },
+    "Email Invoice Trigger": { "main": [[{ "node": "Extract PDF Text", "index": 0 }]] },
+    "Extract PDF Text": { "main": [[{ "node": "AI Invoice Analyzer", "index": 0 }]] },
+    "AI Invoice Analyzer": { "main": [[{ "node": "Save to DB", "index": 0 }]] },
+    "Save to DB": { "main": [[{ "node": "Final Response", "index": 0 }]] }
+  }
+}

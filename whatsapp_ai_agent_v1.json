@@ -1,0 +1,80 @@
+{
+  "name": "Arvia WhatsApp AI Agent v1.0",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\n// Extraer mensaje y remitente (Formato Twilio/Meta)\nconst message = body.Body || body.message?.text?.body || '';\nconst from = body.From || body.contacts?.[0]?.wa_id || '';\nreturn [{ json: { message, from, timestamp: new Date().toISOString() } }];"
+      },
+      "name": "Parse Incoming WA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.WEB_API_URL || 'http://localhost:5678/webhook/web-api' }}",
+        "sendBody": true,
+        "jsonBody": "={\n  \"operation\": \"ai_search\",\n  \"payload\": {\n    \"prompt\": \"{{ $json.message }}\"\n  }\n}",
+        "options": {}
+      },
+      "name": "Consultar Propiedades IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [550, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.data || [];\nconst from = $node['Parse Incoming WA'].json.from;\nif (results.length === 0) {\n  return [{ json: { to: from, message: \"Lo siento, no encontré propiedades con esas características. ¿Te gustaría intentar con otra zona?\" } }];\n}\nconst preview = results.slice(0, 3).map(p => `🏠 *${p.title}*\\n📍 ${p.comuna}\\n💰 ${p.price.toLocaleString('es-CL')} CLP\\n🔗 Ver más: https://arvia.ai/property/${p.id}`).join('\\n\\n');\nreturn [{ json: { to: from, message: `¡Hola! Encontré estas opciones para ti:\\n\\n${preview}` } }];"
+      },
+      "name": "Formatear Respuesta WA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/{{ $env.TWILIO_SID }}/Messages.json",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "To", "value": "={{ $json.to }}" },
+            { "name": "From", "value": "whatsapp:{{ $env.TWILIO_NUMBER }}" },
+            { "name": "Body", "value": "={{ $json.message }}" }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1050, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "TWILIO_CRED_ID",
+          "name": "Twilio Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook": { "main": [[{ "node": "Parse Incoming WA", "index": 0 }]] },
+    "Parse Incoming WA": { "main": [[{ "node": "Consultar Propiedades IA", "index": 0 }]] },
+    "Consultar Propiedades IA": { "main": [[{ "node": "Formatear Respuesta WA", "index": 0 }]] },
+    "Formatear Respuesta WA": { "main": [[{ "node": "Enviar WhatsApp", "index": 0 }]] }
+  }
+}

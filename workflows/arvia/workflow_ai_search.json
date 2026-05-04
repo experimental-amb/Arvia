@@ -1,0 +1,186 @@
+{
+  "name": "Arvia — AI Search",
+  "nodes": [
+    {
+      "id": "webhook-ai",
+      "name": "Webhook AI Search",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "arvia-ai-search",
+        "responseMode": "responseNode",
+        "authentication": "none"
+      }
+    },
+    {
+      "id": "extract-ai",
+      "name": "Extract Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const EXPECTED_KEY = $env.WEB_API_KEY || 'arvia-key-changeme';\nconst body = $input.first().json?.body ?? $input.first().json;\nconst apiKey = $input.first().headers?.['x-api-key'];\nif (apiKey !== EXPECTED_KEY) {\n  return [{ json: { __auth_error: true } }];\n}\nconst payload = body.payload ?? body;\nreturn [{ json: {\n  prompt: payload.prompt || 'todas',\n  userId: payload.userId || null,\n  limit: payload.limit || 20\n}}];"
+      }
+    },
+    {
+      "id": "db-all-props",
+      "name": "DB Fetch Properties",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        680,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, title, description, price, currency, region, comuna, address, bedrooms, bathrooms, sqm, property_type, operation, status, images FROM properties WHERE status IN ('published','active') ORDER BY created_at DESC LIMIT 500",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "ai-filter",
+      "name": "AI Filter Properties",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "resource": "text",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Eres un asistente inmobiliario chileno experto. Recibes un listado de propiedades en JSON y una consulta del usuario. Devuelve SOLO un array JSON con las propiedades que coinciden con la consulta. Sin texto adicional. Si ninguna coincide, devuelve []."
+            },
+            {
+              "role": "user",
+              "content": "Consulta: {{ $('Extract Prompt').first().json.prompt }}\n\nPropiedades disponibles:\n{{ JSON.stringify($input.all().map(i => i.json), null, 2) }}"
+            }
+          ]
+        },
+        "options": {
+          "maxTokens": 2000,
+          "temperature": 0
+        }
+      }
+    },
+    {
+      "id": "parse-ai",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const aiText = $input.first().json?.message?.content ?? $input.first().json?.text ?? '[]';\nlet results = [];\ntry {\n  const cleaned = aiText.replace(/```json|```/g, '').trim();\n  results = JSON.parse(cleaned);\n  if (!Array.isArray(results)) results = [];\n} catch(e) {\n  results = [];\n}\nreturn [{ json: { success: true, data: results, count: results.length, op: 'ai_search' } }];"
+      }
+    },
+    {
+      "id": "respond-ai",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook AI Search": {
+      "main": [
+        [
+          {
+            "node": "Extract Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Prompt": {
+      "main": [
+        [
+          {
+            "node": "DB Fetch Properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Fetch Properties": {
+      "main": [
+        [
+          {
+            "node": "AI Filter Properties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Filter Properties": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    {
+      "name": "arvia"
+    },
+    {
+      "name": "ai"
+    }
+  ],
+  "meta": {
+    "instanceId": "arvia-ai-search-v1"
+  }
+}

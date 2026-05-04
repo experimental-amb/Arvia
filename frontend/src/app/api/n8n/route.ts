@@ -1,13 +1,14 @@
 /**
- * Proxy API route — reenvía todas las peticiones del frontend al webhook de n8n.
+ * /api/n8n — Proxy server-side hacia n8n webhook.
  *
- * Por qué existe:
- *   El browser bloquea cross-origin requests (CORS) desde Vercel hacia ngrok.
- *   Este route handler corre en el servidor, donde CORS no aplica.
+ * Por que existe: CORS bloquea requests directos desde Vercel a ngrok.
+ * Este handler corre en el servidor (Node.js Edge), donde CORS no aplica.
  *
- * Variables de entorno requeridas en Vercel:
- *   NEXT_PUBLIC_API_BASE_URL  — URL completa del webhook n8n (ngrok URL)
- *   N8N_WEBHOOK_URL           — alternativa server-only (prioridad sobre la anterior)
+ * Variables requeridas:
+ *   N8N_WEBHOOK_URL      — URL del webhook (server-only, prioritaria)
+ *   NEXT_PUBLIC_API_BASE_URL — Fallback si la anterior no esta definida
+ *   N8N_API_KEY          — API key para x-api-key header (server-only)
+ *   NEXT_PUBLIC_API_KEY  — Fallback publico de la anterior
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,37 +23,52 @@ const N8N_KEY =
   process.env.NEXT_PUBLIC_API_KEY ??
   "";
 
-// Timeout de 30s para operaciones bulk (CSV grande)
 const FETCH_TIMEOUT_MS = 30_000;
 
+function requestId() {
+  return Math.random().toString(36).slice(2, 10).toUpperCase();
+}
+
+function log(level: "INFO" | "WARN" | "ERROR", rid: string, msg: string, extra?: object) {
+  const entry = { ts: new Date().toISOString(), level, rid, msg, ...extra };
+  if (level === "ERROR") console.error(JSON.stringify(entry));
+  else console.log(JSON.stringify(entry));
+}
+
 export async function POST(req: NextRequest) {
-  /* ── 1. URL configurada ─────────────────────────────────────── */
+  const rid = requestId();
+  const startMs = Date.now();
+
+  /* 1. URL configurada */
   if (!N8N_URL) {
+    log("ERROR", rid, "N8N_WEBHOOK_URL no configurada");
     return NextResponse.json(
-      {
-        error:
-          "N8N_WEBHOOK_URL no configurada. Agrega NEXT_PUBLIC_API_BASE_URL en las variables de entorno de Vercel.",
-      },
+      { error: "N8N_WEBHOOK_URL no configurada. Agrega la variable en Vercel." },
       { status: 503 }
     );
   }
 
-  /* ── 2. Parsear body ────────────────────────────────────────── */
+  /* 2. Parsear body */
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Request body inválido (no es JSON)." }, { status: 400 });
+    log("WARN", rid, "Request body invalido");
+    return NextResponse.json({ error: "Request body invalido (no es JSON)." }, { status: 400 });
   }
 
-  /* ── 3. Headers hacia n8n ───────────────────────────────────── */
+  const operation = (body as any)?.operation ?? "unknown";
+  log("INFO", rid, "Proxying request", { operation });
+
+  /* 3. Headers hacia n8n */
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "ngrok-skip-browser-warning": "true",
+    "X-Request-ID": rid,
   };
   if (N8N_KEY) headers["x-api-key"] = N8N_KEY;
 
-  /* ── 4. Llamar a n8n con timeout ───────────────────────────── */
+  /* 4. Llamar a n8n con timeout */
   let res: Response;
   try {
     const controller = new AbortController();
@@ -68,34 +84,43 @@ export async function POST(req: NextRequest) {
     clearTimeout(timer);
   } catch (err: any) {
     const isTimeout = err?.name === "AbortError";
+    const durationMs = Date.now() - startMs;
+    log("ERROR", rid, isTimeout ? "n8n timeout" : "n8n unreachable", {
+      operation,
+      durationMs,
+      error: err?.message,
+    });
     return NextResponse.json(
       {
         error: isTimeout
-          ? `n8n tardó más de ${FETCH_TIMEOUT_MS / 1000}s en responder. El workflow puede estar procesando en segundo plano.`
-          : `No se pudo conectar con n8n: ${err?.message ?? "network error"}. Verifica que ngrok esté corriendo.`,
+          ? `n8n no respondio en ${FETCH_TIMEOUT_MS / 1000}s. El workflow puede estar procesando en segundo plano.`
+          : `No se pudo conectar con n8n: ${err?.message ?? "network error"}. Verifica que ngrok/VPS este activo.`,
       },
       { status: 502 }
     );
   }
 
-  /* ── 5. Leer respuesta ──────────────────────────────────────── */
+  /* 5. Leer respuesta */
   const text = await res.text();
+  const durationMs = Date.now() - startMs;
 
-  // n8n devuelve HTML si ngrok intercepta (browser warning)
+  // n8n devuelve HTML si ngrok intercepta
   if (text.trim().startsWith("<")) {
+    log("ERROR", rid, "ngrok intercepto la peticion (respuesta HTML)", { operation, durationMs });
     return NextResponse.json(
-      { error: "ngrok interceptó la petición. Asegúrate de que la URL de ngrok es correcta y que el túnel está activo." },
+      { error: "ngrok intercepto la peticion. Verifica que el tunel este activo y la URL sea correcta." },
       { status: 502 }
     );
   }
 
-  // Body vacío — el workflow activo siempre devuelve algo si usa respondToWebhook
+  // Body vacio
   if (!text.trim()) {
+    log("WARN", rid, "n8n respondio con body vacio", { operation, status: res.status, durationMs });
     return NextResponse.json(
       {
         error:
-          `n8n no envió respuesta (body vacío, HTTP ${res.status}). ` +
-          `Verifica: 1) El workflow está activo (toggle verde). 2) El nodo "Web API Response" está conectado. 3) El workflow tiene el path correcto "web-api".`,
+          `n8n no envio respuesta (body vacio, HTTP ${res.status}). ` +
+          `Verifica: 1) Workflow activo. 2) Nodo Respond to Webhook conectado. 3) Path "web-api" correcto.`,
       },
       { status: 502 }
     );
@@ -104,22 +129,26 @@ export async function POST(req: NextRequest) {
   // Error HTTP de n8n
   if (!res.ok) {
     let parsed: any = {};
-    try {
-      parsed = JSON.parse(text);
-    } catch {}
+    try { parsed = JSON.parse(text); } catch {}
+    log("WARN", rid, "n8n respondio con error HTTP", { operation, status: res.status, durationMs });
     return NextResponse.json(
-      { error: parsed?.error ?? `n8n respondió con error HTTP ${res.status}`, detail: text.slice(0, 300) },
+      { error: parsed?.error ?? `n8n respondio con error HTTP ${res.status}`, detail: text.slice(0, 300) },
       { status: res.status }
     );
   }
 
-  /* ── 6. Devolver respuesta exitosa ──────────────────────────── */
+  /* 6. Devolver respuesta exitosa */
   try {
     const data = JSON.parse(text);
-    return NextResponse.json(data, { status: 200 });
+    log("INFO", rid, "Request completado", { operation, durationMs, status: res.status });
+    return NextResponse.json(data, {
+      status: 200,
+      headers: { "X-Request-ID": rid, "X-Duration-Ms": String(durationMs) },
+    });
   } catch {
+    log("ERROR", rid, "Respuesta de n8n no es JSON valido", { operation, durationMs });
     return NextResponse.json(
-      { error: `Respuesta de n8n no es JSON válido: ${text.slice(0, 200)}` },
+      { error: `Respuesta de n8n no es JSON valido: ${text.slice(0, 200)}` },
       { status: 502 }
     );
   }

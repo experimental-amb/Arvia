@@ -1,0 +1,23 @@
+{
+  "skill_name": "n8n-workflow-reviewer",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Can you review this n8n workflow for production readiness? We're about to deploy it to our VPS and I want to make sure there are no critical issues.\n\nFile: D:\\InitCore\\workflows\\arvia\\workflow_properties.json",
+      "expected_output": "A structured audit report with Critical/Warning/Suggestion/Good sections. Should identify: fallback branch on Switch node, API key validation present (good), parameterized queries (good), error handling gaps, response payload optimization. Should use exact node names. Must include the summary table and production-ready verdict.",
+      "files": ["D:\\InitCore\\workflows\\arvia\\workflow_properties.json"]
+    },
+    {
+      "id": 1,
+      "prompt": "Audit this n8n workflow and tell me if there are security or reliability issues I should fix before going live.\n\nFile: D:\\InitCore\\workflows\\90_llm_handler.json",
+      "expected_output": "Structured audit identifying security issues (hardcoded secrets check, webhook auth check), reliability issues (error handling, empty response guard), and data quality issues. Should name specific nodes, not generic advice. Must include summary table.",
+      "files": ["D:\\InitCore\\workflows\\90_llm_handler.json"]
+    },
+    {
+      "id": 2,
+      "prompt": "I have a WhatsApp automation workflow in n8n. Is it production-ready? What would break first under load?\n\nFile: D:\\InitCore\\workflows\\01_whatsapp_adapter.json",
+      "expected_output": "Audit focused on messaging reliability: retry logic, webhook security, message deduplication, error paths. Should answer the 'what breaks under load' question specifically - not just generic audit. Should identify N+1 query risks if any, timeout handling, and orphaned nodes.",
+      "files": ["D:\\InitCore\\workflows\\01_whatsapp_adapter.json"]
+    }
+  ]
+}

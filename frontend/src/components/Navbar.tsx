@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, LayoutDashboard, PlusCircle, LogIn, LogOut, Home, Search } from "lucide-react";
+import { Sparkles, LayoutDashboard, PlusCircle, LogIn, LogOut, Home, Search, ReceiptText, Menu } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,6 +28,7 @@ const links = [
   { href: "/search", label: "Buscar", icon: Search },
   { href: "/publish", label: "Publicar", icon: PlusCircle },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/billing", label: "Facturas", icon: ReceiptText },
 ];
 
 export function Navbar() {
@@ -43,7 +51,7 @@ export function Navbar() {
               <Sparkles className="relative h-5 w-5 text-[hsl(var(--brand))]" />
             </div>
             <span className="font-semibold tracking-tight">
-              InitCore<span className="text-[hsl(var(--brand))]">.ai</span>
+              Arvia<span className="text-[hsl(var(--brand))]">.ai</span>
             </span>
           </Link>
 
@@ -79,6 +87,38 @@ export function Navbar() {
           </nav>
 
           <div className="flex items-center gap-2">
+            {/* Mobile Menu */}
+            <div className="md:hidden">
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon" className="rounded-xl">
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-[300px] border-white/10 bg-black/90 backdrop-blur-xl">
+                  <SheetHeader className="text-left mb-8">
+                    <SheetTitle className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-indigo-500" />
+                      Arvia.ai
+                    </SheetTitle>
+                  </SheetHeader>
+                  <div className="flex flex-col gap-2">
+                    {links.map((l) => (
+                      <Link key={l.href} href={l.href}>
+                        <Button
+                          variant={pathname === l.href ? "secondary" : "ghost"}
+                          className="w-full justify-start gap-3 h-12 rounded-xl"
+                        >
+                          <l.icon size={18} />
+                          {l.label}
+                        </Button>
+                      </Link>
+                    ))}
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

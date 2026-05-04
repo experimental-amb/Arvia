@@ -13,37 +13,34 @@ import type { Property } from "@/types/property";
 export default function PropertyPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const [property, setProperty] = useState<Property | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
+  const [property, setProperty]     = useState<Property | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [notFound, setNotFound]     = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setFetchError(null);
       try {
         const p = await getProperty(params.id);
         if (cancelled) return;
         if (!p) setNotFound(true);
         else setProperty(p);
+      } catch (err: any) {
+        if (!cancelled) setFetchError(err?.message ?? "Error al cargar la propiedad.");
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [params.id]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
       <div className="mb-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.back()}
-          className="gap-1.5"
-        >
+        <Button variant="ghost" size="sm" onClick={() => router.back()} className="gap-1.5">
           <ArrowLeft className="h-3.5 w-3.5" />
           Volver
         </Button>
@@ -62,7 +59,17 @@ export default function PropertyPage() {
         </div>
       )}
 
-      {!loading && notFound && (
+      {!loading && fetchError && (
+        <div className="glass-card rounded-2xl p-10 text-center">
+          <h2 className="text-xl font-semibold text-rose-300">Error al cargar</h2>
+          <p className="text-sm text-muted-foreground mt-1">{fetchError}</p>
+          <Button onClick={() => window.location.reload()} className="mt-4">
+            Reintentar
+          </Button>
+        </div>
+      )}
+
+      {!loading && !fetchError && notFound && (
         <div className="glass-card rounded-2xl p-10 text-center">
           <h2 className="text-xl font-semibold">Propiedad no encontrada</h2>
           <p className="text-sm text-muted-foreground mt-1">

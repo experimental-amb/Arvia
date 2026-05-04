@@ -3,9 +3,16 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Search as SearchIcon, Sparkles } from "lucide-react";
+import { Search as SearchIcon, Sparkles, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { PropertyGrid } from "@/components/PropertyGrid";
 import { FilterSidebar } from "@/components/FilterSidebar";
 import { searchProperties } from "@/services/api";
@@ -89,21 +96,53 @@ function SearchInner() {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wider text-[hsl(var(--brand))]">
-              Resumen InitCore
+              Análisis Arvia
             </div>
             <p className="text-sm mt-1 text-foreground/90">{result.aiSummary}</p>
           </div>
         </motion.div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[280px,1fr]">
-        <FilterSidebar
-          value={filters}
-          onChange={setFilters}
-          onApply={() => run(filters)}
-        />
+      <div className="flex flex-col lg:grid lg:grid-cols-[280px,1fr] gap-6">
+        {/* Desktop Sidebar */}
+        <aside className="hidden lg:block">
+          <FilterSidebar
+            value={filters}
+            onChange={setFilters}
+            onApply={() => run(filters)}
+          />
+        </aside>
+
+        {/* Mobile Filter Trigger */}
+        <div className="lg:hidden flex items-center justify-between">
+          <div className="text-xs text-muted-foreground">
+            {loading
+              ? "Buscando…"
+              : `${result?.total ?? 0} propiedad${(result?.total ?? 0) === 1 ? "" : "es"}`}
+          </div>
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2 rounded-xl border-white/10 bg-white/5">
+                <Filter className="h-3.5 w-3.5" /> Filtros
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl border-white/10 bg-black/95 backdrop-blur-2xl p-0">
+              <div className="p-6 overflow-y-auto h-full pb-24">
+                <SheetHeader className="mb-6">
+                  <SheetTitle>Filtros de búsqueda</SheetTitle>
+                </SheetHeader>
+                <FilterSidebar
+                  value={filters}
+                  onChange={setFilters}
+                  onApply={() => run(filters)}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+
         <section>
-          <div className="mb-4 flex items-center justify-between">
+          <div className="hidden lg:flex mb-4 items-center justify-between">
             <div className="text-xs text-muted-foreground">
               {loading
                 ? "Buscando…"

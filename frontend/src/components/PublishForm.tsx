@@ -19,8 +19,10 @@ import {
 } from "@/components/ui/select";
 import { publishProperty } from "@/services/api";
 import { useAuth } from "@/lib/auth-context";
+import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { REGIONES_CHILE, getComunasByRegion, REGION_NAMES } from "@/lib/chile-regiones";
+import { ImageUpload } from "@/components/ImageUpload";
 
 export function PublishForm() {
   const { user } = useAuth();
@@ -73,6 +75,10 @@ export function PublishForm() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      toast.error("Debes iniciar sesion para publicar propiedades.");
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -90,6 +96,7 @@ export function PublishForm() {
         userId: user?.uid,
       });
       setDone(true);
+      toast.success("Propiedad publicada correctamente.");
       setTimeout(() => router.push(`/property/${created.id}`), 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo publicar.");
@@ -288,57 +295,16 @@ export function PublishForm() {
 
         <section className="glass-card rounded-2xl p-6 space-y-4">
           <Header icon={<ImagePlus className="h-3.5 w-3.5" />} eyebrow="Paso 3">
-            Imágenes
+            Imágenes de la propiedad
           </Header>
-
-          <div
-            onClick={() => fileRef.current?.click()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              handleFiles(e.dataTransfer.files);
-            }}
-            className="cursor-pointer rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center hover:border-[hsl(var(--brand))]/50 hover:bg-white/[0.04] transition"
-          >
-            <ImagePlus className="mx-auto h-6 w-6 text-muted-foreground" />
-            <p className="mt-2 text-sm text-muted-foreground">
-              Arrastra imágenes o{" "}
-              <span className="text-[hsl(var(--brand))]">haz click para subir</span>
-            </p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
-              Hasta 6 imágenes · JPG/PNG
-            </p>
-          </div>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => handleFiles(e.target.files)}
+          <ImageUpload 
+            maxFiles={6} 
+            onUpload={(urls) => setImages(prev => [...prev, ...urls].slice(0, 6))} 
           />
-
           {images.length > 0 && (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {images.map((src, i) => (
-                <motion.div
-                  key={src.slice(0, 40) + i}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="group relative aspect-square overflow-hidden rounded-xl border border-white/10"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt="" className="h-full w-full object-cover" />
-                  <button
-                    type="button"
-                    onClick={() => removeImage(i)}
-                    className="absolute right-1.5 top-1.5 rounded-full bg-black/60 p-1 opacity-0 transition group-hover:opacity-100"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </motion.div>
-              ))}
-            </div>
+            <p className="text-[10px] text-muted-foreground text-center">
+              * Las imágenes se optimizan automáticamente para carga rápida.
+            </p>
           )}
         </section>
       </div>
