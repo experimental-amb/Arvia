@@ -88,13 +88,51 @@ function toArray<T>(val: any): T[] {
 }
 
 export async function searchProperties(filters: SearchFilters): Promise<SearchResult> {
-  const res = await n8nRequest<any>("ai_search", { prompt: filters.q || "todas" });
-  const items = toArray<Property>(unwrapN8n(res));
+  const res = await n8nRequest<any>("list_properties", { userId: null });
+  const allItems = toArray<Property>(unwrapN8n(res));
+
+  // Filtrado client-side
+  const q = (filters.q ?? "").toLowerCase().trim();
+  const items = allItems.filter((p: any) => {
+    if (q) {
+      const haystack = [
+        p.title, p.description, p.address, p.city, p.region,
+        p.comuna, p.tipo, p.type, p.titulo, p.descripcion,
+      ].join(" ").toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    if (filters.region && p.region !== filters.region) return false;
+    if (filters.comuna && p.comuna !== filters.comuna) return false;
+    if (filters.bedrooms != null) {
+      const beds = Number(p.bedrooms ?? p.dormitorios ?? p.habitaciones ?? 0);
+      if (beds < filters.bedrooms) return false;
+    }
+    if (filters.bathrooms != null) {
+      const baths = Number(p.bathrooms ?? p.banos ?? 0);
+      if (baths < filters.bathrooms) return false;
+    }
+    if (filters.maxPrice != null) {
+      const price = Number(p.price ?? p.precio ?? 0);
+      if (price > filters.maxPrice) return false;
+    }
+    if (filters.minSqm != null) {
+      const sqm = Number(p.sqm ?? p.superficie ?? p.area ?? 0);
+      if (sqm < filters.minSqm) return false;
+    }
+    if (filters.maxSqm != null) {
+      const sqm = Number(p.sqm ?? p.superficie ?? p.area ?? 0);
+      if (sqm > filters.maxSqm) return false;
+    }
+    return true;
+  });
+
   return {
     items,
     total: items.length,
     query: filters.q ?? "",
-    aiSummary: `${items.length} propiedades encontradas.`,
+    aiSummary: items.length > 0 && q
+      ? `${items.length} propiedad${items.length === 1 ? "" : "es"} encontrada${items.length === 1 ? "" : "s"} para "${filters.q}".`
+      : undefined,
   };
 }
 

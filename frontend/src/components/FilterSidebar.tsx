@@ -38,13 +38,13 @@ export function FilterSidebar({ value, onChange, onApply }: FilterSidebarProps) 
   const comunasDisponibles = selectedRegion ? getComunasByRegion(selectedRegion) : [];
 
   const handleRegionChange = (region: string) => {
-    setSelectedRegion(region);
-    // Al cambiar región, reseteamos la comuna seleccionada
-    onChange({ ...value, region: region || undefined, comuna: undefined });
+    const val = region === "__all__" ? "" : region;
+    setSelectedRegion(val);
+    onChange({ ...value, region: val || undefined, comuna: undefined });
   };
 
   const handleComunaChange = (comuna: string) => {
-    onChange({ ...value, comuna: comuna || undefined });
+    onChange({ ...value, comuna: comuna === "__all__" ? undefined : (comuna || undefined) });
   };
 
   const reset = () => {
@@ -79,12 +79,12 @@ export function FilterSidebar({ value, onChange, onApply }: FilterSidebarProps) 
       {/* Selector Región */}
       <div className="space-y-2">
         <Label>Región</Label>
-        <Select value={selectedRegion} onValueChange={handleRegionChange}>
+        <Select value={selectedRegion || "__all__"} onValueChange={handleRegionChange}>
           <SelectTrigger id="filter-region">
             <SelectValue placeholder="Todas las regiones" />
           </SelectTrigger>
           <SelectContent className="max-h-72 overflow-y-auto">
-            <SelectItem value="">Todas las regiones</SelectItem>
+            <SelectItem value="__all__">Todas las regiones</SelectItem>
             <SelectGroup>
               <SelectLabel>Zona Norte</SelectLabel>
               {REGIONES_CHILE.slice(0, 4).map((r) => (
@@ -125,7 +125,7 @@ export function FilterSidebar({ value, onChange, onApply }: FilterSidebarProps) 
       <div className="space-y-2">
         <Label>Comuna</Label>
         <Select
-          value={value.comuna ?? ""}
+          value={value.comuna || "__all__"}
           onValueChange={handleComunaChange}
           disabled={!selectedRegion}
         >
@@ -135,7 +135,7 @@ export function FilterSidebar({ value, onChange, onApply }: FilterSidebarProps) 
             />
           </SelectTrigger>
           <SelectContent className="max-h-72 overflow-y-auto">
-            <SelectItem value="">Todas las comunas</SelectItem>
+            <SelectItem value="__all__">Todas las comunas</SelectItem>
             {comunasDisponibles.map((c) => (
               <SelectItem key={c} value={c}>
                 {c}
